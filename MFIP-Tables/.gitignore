@@ -1,0 +1,8 @@
+**/results
+**/lookupTables
+**/__pycache__
+*.pdf
+*.pkl
+*.csv
+*.npy
+*.txt
