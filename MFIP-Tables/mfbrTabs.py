@@ -3,11 +3,11 @@ from scipy import optimize, stats
 from scipy.integrate import quad
 import scipy.special as sc
 import glob
-
+import warnings
+warnings.filterwarnings('ignore')
 from utils import *
 
-RANDN = 32
-
+RANDN = 16
 def getIndexQF(x, t):
     return len(np.where(t<x)[0])
 
@@ -17,22 +17,27 @@ def getIndexQF(x, t):
         We're going to have x and y positions for both the table and the rand.
 '''
 
-def computeScore(x, y, t, table, rand):
+def computeScore(x, y, t, tabShare1, tabShare2):
     nFeat = len(x)
     score = 0
+    mask = 0
     for i in range(nFeat):
         ix = getIndexQF(x[i], t)
         iy = getIndexQF(y[i], t)
-        score += (table[ix,iy] + rand[ix,iy])
-    return score
+        ir = np.random.randint(0, 2**RANDN, dtype=np.uint32)
+        mask  = mask + ir
+        score += (tabShare1[ix,iy] + tabShare2[ix,iy]) + ir 
+    return score, mask
+
+
 
 
 def compIPandIPQ(i, synSamples, t, tabQMFIP, tabRand):
     x = synSamples[:,i]
     y = synSamples[:,i+1]
     ip = np.sum(x*y)
-    ipQ = computeScore(x, y, t, tabQMFIP, tabRand)
-    return ip, ipQ
+    ipQ, mask = computeScore(x, y, t, tabQMFIP, tabRand)
+    return ip, (ipQ - mask)# % 2**RANDN
 
 
 
@@ -165,7 +170,8 @@ def matedIP(dataDir, subject, t, tabQIP, tabRand, nFix = 15):
         y = np.load(subjectImgs[j])
         y = normalizeSample(y)
         matedScIP.append(np.sum(x*y))
-        matedScIPQ.append(computeScore(x, y, t, tabQIP, tabRand))
+        score, mask = computeScore(x, y, t, tabQIP, tabRand)
+        matedScIPQ.append(score - mask)
     return matedScIP, matedScIPQ
 
 
@@ -199,7 +205,8 @@ def nonMatedIP(dataDir, subject, subjectIDs, t, tabQIP, tabRand, nFix = 5):
             y = normalizeSample(y)
 
             nonMatedScIP.append(np.sum(x*y))
-            nonMatedScIPQ.append(computeScore(x, y, t, tabQIP, tabRand))
+            score, mask = computeScore(x, y, t, tabQIP, tabRand)
+            nonMatedScIPQ.append(score - mask)
 
     return nonMatedScIP, nonMatedScIPQ
 
