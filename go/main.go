@@ -1,131 +1,10 @@
 package main
 
 import (
-    "os"
 	"fmt"
 	"math"
-	"math/rand"
-    "encoding/csv"
-    "strconv"
 )
 
-// Creating random indexes and matrices for demo
-
-func genRandMFBR(size uint32) [][]uint32 {
-    X := make([][]uint32, size)
-    for row := range X{
-        X[row] = make([]uint32, size)
-        for col := range X[row]{
-            X[row][col] = uint32(rand.Intn(int(math.Pow(float64(size), 2))))
-        }
-    }
-    return X
-}
-
-func genRandInexes(size uint32, maxval uint32) []uint32 {
-    b := make([]uint32, size)
-    for i := range size {
-        b[i] = uint32(rand.Intn(int(maxval)))
-    }
-    return b
-}
-
-func printMatrix[T any](matrix [][]T) {
-    for _, m := range matrix {
-        fmt.Println(m)
-    }
-}
-
-func arange(start, stop, step int) []int {
-	var result []int
-	for i := start; i < stop; i += step {
-		result = append(result, i)
-	}
-	return result
-}
-
-func readCSVToUint32Array1d(filename string) ([]float32, error) {
-    file, err := os.Open(filename)
-    if err != nil {
-        return nil, err
-    }
-    defer file.Close()
-
-    reader := csv.NewReader(file)
-
-    stringRows, err := reader.ReadAll()
-    if err != nil {
-        return nil, err
-    }
-
-    var uint32Array []float32
-    for _, value := range stringRows[0] {
-        uint32Value, err := strconv.ParseFloat(value, 32)
-        if err != nil {
-            return nil, err
-        }
-        uint32Array = append(uint32Array, float32(uint32Value))
-    }
-    return uint32Array, nil
-}
-
-func readCSVToUint32Array2d(filename string) ([][]uint32, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-
-	stringRows, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-
-	var uint32Matrix [][]uint32
-	for _, stringRow := range stringRows {
-		var uint32Row []uint32
-		for _, value := range stringRow {
-			uint32Value, err := strconv.ParseUint(value, 10, 32)
-			if err != nil {
-				return nil, err
-			}
-			uint32Row = append(uint32Row, uint32(uint32Value))
-		}
-		uint32Matrix = append(uint32Matrix, uint32Row)
-	}
-	return uint32Matrix, nil
-}
-
-func readCSVToFloat32Array2d(filename string) ([][]float32, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-
-	stringRows, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-
-	var float32Matrix [][]float32
-	for _, stringRow := range stringRows {
-		var float32Row []float32
-		for _, value := range stringRow {
-			float32Value, err := strconv.ParseFloat(value, 32)
-			if err != nil {
-				return nil, err
-			}
-			float32Row = append(float32Row, float32(float32Value))
-		}
-		float32Matrix = append(float32Matrix, float32Row)
-	}
-	return float32Matrix, nil
-}
 
 func PearsonCorrelation(x []uint32, y []float32) float32 {
     if len(x) != len(y) {
@@ -190,10 +69,10 @@ func main() {
     tabRandPath := "./lookupTables/Rand/Rand_nB_3_dimF_512.csv"
     tabQMFIPPath := "./lookupTables/MFIP-Rand/MFIPSubRand_nB_3_dimF_512.csv"
 
-    synSamples, err := readCSVToFloat32Array2d(synPath)
-    borders, err := readCSVToUint32Array1d(bordersPath)
-    tabRand, err := readCSVToUint32Array2d(tabRandPath)
-    tabQMFIP, err := readCSVToUint32Array2d(tabQMFIPPath)
+    synSamples, err := readCSVToArray(synPath, "[][]float32")
+    borders, err := readCSVToArray(bordersPath, "[]float32")
+    tabRand, err := readCSVToArray(tabRandPath, "[][]uint32")
+    tabQMFIP, err := readCSVToArray(tabQMFIPPath, "[][]uint32")
     if err != nil {
         fmt.Println("Error reading one of the csv files:", err)
     }
@@ -202,8 +81,7 @@ func main() {
     var scoresIPQ []uint32
 
     for _, id := range idSynSamples {
-        ip, ipQ := compIPandIPQ(id, synSamples, borders, tabQMFIP, tabRand)
-        //fmt.Printf("ip: %v, ipQ: %v \n", ip, ipQ)
+        ip, ipQ := compIPandIPQ(id, synSamples.([][]float32), borders.([]float32), tabQMFIP.([][]uint32), tabRand.([][]uint32))
         scoresIP = append(scoresIP, float32(ip))
         scoresIPQ = append(scoresIPQ, uint32(ipQ))
     }
