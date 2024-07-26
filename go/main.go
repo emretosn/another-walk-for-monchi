@@ -31,23 +31,20 @@ func genRandInexes(size uint32, maxval uint32) []uint32 {
 }
 
 func printMatrix[T any](matrix [][]T) {
-    for i := range matrix {
-        for j := range matrix[i] {
-            fmt.Print(matrix[i][j], " ")
-        }
-        fmt.Print("\n")
+    for _, m := range matrix {
+        fmt.Println(m)
     }
 }
 
-func arange(start, stop, step int) []uint32 {
-	var result []uint32
+func arange(start, stop, step int) []int {
+	var result []int
 	for i := start; i < stop; i += step {
-		result = append(result, uint32(i))
+		result = append(result, i)
 	}
 	return result
 }
 
-func readCSVToUint32Array1d(filename string) ([]uint32, error) {
+func readCSVToUint32Array1d(filename string) ([]float32, error) {
     file, err := os.Open(filename)
     if err != nil {
         return nil, err
@@ -61,13 +58,13 @@ func readCSVToUint32Array1d(filename string) ([]uint32, error) {
         return nil, err
     }
 
-    var uint32Array []uint32
+    var uint32Array []float32
     for _, value := range stringRows[0] {
-        uint32Value, err := strconv.ParseUint(value, 10, 32)
+        uint32Value, err := strconv.ParseFloat(value, 32)
         if err != nil {
             return nil, err
         }
-        uint32Array = append(uint32Array, uint32(uint32Value))
+        uint32Array = append(uint32Array, float32(uint32Value))
     }
     return uint32Array, nil
 }
@@ -99,6 +96,35 @@ func readCSVToUint32Array2d(filename string) ([][]uint32, error) {
 		uint32Matrix = append(uint32Matrix, uint32Row)
 	}
 	return uint32Matrix, nil
+}
+
+func readCSVToFloat32Array2d(filename string) ([][]float32, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+
+	stringRows, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	var float32Matrix [][]float32
+	for _, stringRow := range stringRows {
+		var float32Row []float32
+		for _, value := range stringRow {
+			float32Value, err := strconv.ParseFloat(value, 32)
+			if err != nil {
+				return nil, err
+			}
+			float32Row = append(float32Row, float32(float32Value))
+		}
+		float32Matrix = append(float32Matrix, float32Row)
+	}
+	return float32Matrix, nil
 }
 
 func PearsonCorrelation(x []uint32, y []float32) float32 {
@@ -156,7 +182,7 @@ func main() {
     // NEXT STEP
     fmt.Println("ADDITIVE SHARE SYNTHETIC")
 
-    numSamples := 2*100000
+    numSamples := 2*1000
     idSynSamples := arange(0, numSamples, 2)
 
     synPath := "./data/Synthetic/syntheticSamples_dimF_512.csv"
@@ -164,7 +190,7 @@ func main() {
     tabRandPath := "./lookupTables/Rand/Rand_nB_3_dimF_512.csv"
     tabQMFIPPath := "./lookupTables/MFIP-Rand/MFIPSubRand_nB_3_dimF_512.csv"
 
-    synSamples, err := readCSVToUint32Array1d(synPath)
+    synSamples, err := readCSVToFloat32Array2d(synPath)
     borders, err := readCSVToUint32Array1d(bordersPath)
     tabRand, err := readCSVToUint32Array2d(tabRandPath)
     tabQMFIP, err := readCSVToUint32Array2d(tabQMFIPPath)
@@ -177,7 +203,7 @@ func main() {
 
     for _, id := range idSynSamples {
         ip, ipQ := compIPandIPQ(id, synSamples, borders, tabQMFIP, tabRand)
-        fmt.Printf("ip: %v, ipQ: %v \n", ip, ipQ)
+        //fmt.Printf("ip: %v, ipQ: %v \n", ip, ipQ)
         scoresIP = append(scoresIP, float32(ip))
         scoresIPQ = append(scoresIPQ, uint32(ipQ))
     }
