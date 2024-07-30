@@ -5,6 +5,12 @@ import (
 	"math/rand"
 )
 
+/*
+    ALL OF THIS MAY BE UNNECESSARY
+
+    I GUESS IT IS :(
+*/
+
 var RANDN int = 16
 
 func getIndexQF(x float32, t []float32) uint32 {
@@ -22,6 +28,7 @@ func computeScore(x, y []float32, t []float32, tabShare1, tabShare2 [][]uint32) 
     for i := range x {
         ix := getIndexQF(x[i], t)
         iy := getIndexQF(y[i], t)
+
         ir := rand.Uint32() % (uint32(math.Pow(2, 16) - 1))
         mask += ir
         score += (tabShare1[ix][iy] + tabShare2[ix][iy]) + ir
@@ -47,3 +54,31 @@ func compIPandIPQ(i int, synSamples [][]float32, t []float32, tabShare1, tabShar
     ipQ, mask := computeScore(x, y, t, tabShare1, tabShare2)
     return ip, (ipQ - mask)
 }
+
+func PearsonCorrelation(x []uint32, y []float32) float32 {
+	if len(x) != len(y) {
+		return 0
+	}
+
+	n := float32(len(x))
+	var sumX, sumY, sumXY, sumX2, sumY2 float32
+
+	for i := 0; i < len(x); i++ {
+		xi := float32(x[i])
+		yi := y[i]
+		sumX += xi
+		sumY += yi
+		sumXY += xi * yi
+		sumX2 += xi * xi
+		sumY2 += yi * yi
+	}
+
+	numerator := n*sumXY - sumX*sumY
+	denominator := float32(math.Sqrt(float64((n*sumX2 - sumX*sumX) * (n*sumY2 - sumY*sumY))))
+
+	if denominator == 0 {
+		return 0
+	}
+	return numerator / denominator
+}
+
