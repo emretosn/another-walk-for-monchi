@@ -1,17 +1,17 @@
 package main
 
-func selectRows(tableMFBR [][]uint64, selections []int) [][]uint64 {
-	A := make([][]uint64, len(selections))
+func selectRows(tableMFBR [][]int64, selections []int) [][]int64 {
+	A := make([][]int64, len(selections))
 	for i, row := range selections {
 		A[i] = tableMFBR[row]
 	}
 	return A
 }
 
-func genIndexMaps(indexes []uint64, cols int) [][]uint64 {
-	bi := make([][]uint64, len(indexes))
+func genIndexMaps(indexes []int64, cols int) [][]int64 {
+	bi := make([][]int64, len(indexes))
 	for i, index := range indexes {
-		bi[i] = make([]uint64, cols)
+		bi[i] = make([]int64, cols)
 		for j := range bi[i] {
 			if j == int(index) {
 				bi[i][j] = 1
@@ -23,10 +23,10 @@ func genIndexMaps(indexes []uint64, cols int) [][]uint64 {
 	return bi
 }
 
-func compRowsTimesMasks(A [][]uint64, b [][]uint64) [][]uint64 {
-	result := make([][]uint64, len(A))
+func compRowsTimesMasks(A [][]int64, b [][]int64) [][]int64 {
+	result := make([][]int64, len(A))
 	for i := range A {
-		result[i] = make([]uint64, len(A[i]))
+		result[i] = make([]int64, len(A[i]))
 		for j := range A[i] {
 			result[i][j] = A[i][j] * b[i][j]
 		}
@@ -34,8 +34,8 @@ func compRowsTimesMasks(A [][]uint64, b [][]uint64) [][]uint64 {
 	return result
 }
 
-func compFlatRowsTimesMasks(A, b []uint64) []uint64 {
-    result := make([]uint64, len(A))
+func compFlatRowsTimesMasks(A, b []int64) []int64 {
+    result := make([]int64, len(A))
     for i := range A {
         result[i] = A[i] * b[i]
     }
