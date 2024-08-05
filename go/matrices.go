@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/csv"
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -51,7 +50,8 @@ func flatten[T any](lists [][]T) []T {
 	return res
 }
 
-func readCSVToArray(filename, valtype string) (interface{}, error) {
+// We don't need to read borders or float values so you can simplify and refactor (eliminate the valtype since it's always [][]int64
+func readCSVToArray(filename string) (interface{}, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -61,47 +61,17 @@ func readCSVToArray(filename, valtype string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	switch valtype {
-	case "[]float64":
-		var float64Array []float64
-		for _, value := range stringRows[0] {
-			float64Value, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				return nil, err
-			}
-			float64Array = append(float64Array, float64(float64Value))
-		}
-		return float64Array, nil
-	case "[][]int64":
-		var int64Matrix [][]int64
-		for _, stringRow := range stringRows {
-			var int64Row []int64
-			for _, value := range stringRow {
-				int64Value, err := strconv.ParseInt(value, 10, 64)
-				if err != nil {
-					return nil, err
-				}
-				int64Row = append(int64Row, int64(int64Value))
-			}
-			int64Matrix = append(int64Matrix, int64Row)
-		}
-		return int64Matrix, nil
-	case "[][]float64":
-		var float64Matrix [][]float64
-		for _, stringRow := range stringRows {
-			var float64Row []float64
-			for _, value := range stringRow {
-				float64Value, err := strconv.ParseFloat(value, 64)
-				if err != nil {
-					return nil, err
-				}
-				float64Row = append(float64Row, float64(float64Value))
-			}
-			float64Matrix = append(float64Matrix, float64Row)
-		}
-		return float64Matrix, nil
-	default:
-		return nil, errors.New("Unexpected type")
-	}
+    var int64Matrix [][]int64
+    for _, stringRow := range stringRows {
+        var int64Row []int64
+        for _, value := range stringRow {
+            int64Value, err := strconv.ParseInt(value, 10, 64)
+            if err != nil {
+                return nil, err
+            }
+            int64Row = append(int64Row, int64(int64Value))
+        }
+        int64Matrix = append(int64Matrix, int64Row)
+    }
+    return int64Matrix, nil
 }

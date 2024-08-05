@@ -5,11 +5,6 @@ import (
 	"math/rand"
 )
 
-/*
-    ALL OF THIS MAY BE UNNECESSARY
-
-    I GUESS IT IS :(
-*/
 
 var RANDN int = 16
 
