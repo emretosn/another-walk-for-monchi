@@ -4,35 +4,36 @@ import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/dbfv"
 	"github.com/tuneinsight/lattigo/v4/drlwe"
+	"github.com/tuneinsight/lattigo/v4/ring"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"github.com/tuneinsight/lattigo/v4/utils"
 )
 
 type Enrollment_s struct {
-    params    bfv.Parameters
-    encoder   bfv.Encoder
-    encryptor rlwe.Encryptor
-    Y_1       [][]int64
-    Y_2       [][]int64
-    c_Y_1     [][]*rlwe.Ciphertext
-    c_Y_2     [][]*rlwe.Ciphertext
+	params    bfv.Parameters
+	encoder   bfv.Encoder
+	encryptor rlwe.Encryptor
+	Y_1       [][]int64
+	Y_2       [][]int64
+	c_Y_1     [][]*rlwe.Ciphertext
+	c_Y_2     [][]*rlwe.Ciphertext
 }
 
 type BIP_s struct {
-    params    bfv.Parameters
-    evaluator bfv.Evaluator
-    c_Y       [][]*rlwe.Ciphertext
-    c_x       []*rlwe.Ciphertext
-    c_z       []*rlwe.Ciphertext
+	params    bfv.Parameters
+	evaluator bfv.Evaluator
+	c_Y       [][]*rlwe.Ciphertext
+	c_x       []*rlwe.Ciphertext
+	c_z       []*rlwe.Ciphertext
 }
 
 type Gate_s struct {
-    params    bfv.Parameters
-    encoder   bfv.Encoder
-    encryptor rlwe.Encryptor
-    x         []int64
-    c_x       []*rlwe.Ciphertext
-    c_z       []*rlwe.Ciphertext
+	params    bfv.Parameters
+	encoder   bfv.Encoder
+	encryptor rlwe.Encryptor
+	x         []int64
+	c_x       []*rlwe.Ciphertext
+	c_z       []*rlwe.Ciphertext
 }
 
 type Party_s struct {
@@ -42,7 +43,7 @@ type Party_s struct {
 	pk          *rlwe.PublicKey
 	encryptor   rlwe.Encryptor
 	decryptor   rlwe.Decryptor
-    corr_prng   *utils.KeyedPRNG
+	corr_prng   *utils.KeyedPRNG
 	prng        *utils.KeyedPRNG
 	ckgShare    *drlwe.CKGShare
 	rlkEphemSk  *rlwe.SecretKey
@@ -119,3 +120,61 @@ func (Enrollment *Enrollment_s) EncryptInput(Y [][]int64) (c_Y [][]*rlwe.Ciphert
 	return
 }
 
+func (BIP *BIP_s) AddCiphertexts(c_Y_1, c_Y_2 []*rlwe.Ciphertext) (c_Y_Sum []*rlwe.Ciphertext) {
+	c_Y_Sum = make([]*rlwe.Ciphertext, len(c_Y_1))
+	for i := range c_Y_1 {
+		if c_Y_2[i] != nil {
+			c_Y_Sum[i] = BIP.evaluator.AddNew(c_Y_1[i], c_Y_2[i])
+		} else {
+			c_Y_Sum[i] = nil
+		}
+	}
+	return
+}
+
+func (P *Party_s) C1ShareDecrypt(c_z []*rlwe.Ciphertext) []*rlwe.Plaintext {
+	P.c1sShares = make([]*rlwe.Plaintext, len(c_z))
+	ringQ := P.params.RingQ()
+	sigma := P.params.Sigma()
+	for i := range c_z {
+		if c_z[i] != nil {
+			P.c1sShares[i] = bfv.NewPlaintext(P.params, c_z[i].Level())
+			// c1 to NTT domain
+			ringQ.NTT(c_z[i].Value[1], P.c1sShares[i].Value)
+			// c1 * sk    <NTT domain>
+			ringQ.MulCoeffsMontgomery(c_z[i].Value[1], P.sk.Value.Q, P.c1sShares[i].Value)
+			// + ei
+			GaussianSampler := ring.NewGaussianSampler(P.prng, ringQ, sigma, int(6*sigma))
+			ei := GaussianSampler.ReadNew()
+			ringQ.NTTLazy(ei, ei)
+			// c1 * sk + ei <NTT domain>
+			ringQ.Add(P.c1sShares[i].Value, ei, P.c1sShares[i].Value)
+		} else {
+			P.c1sShares[i] = nil
+		}
+	}
+	return P.c1sShares
+}
+
+// TODO: integrate
+func (P *Party_s) AggregateAndDecrypt(Pj_c1sShares []*rlwe.Plaintext) (res [][]int64) {
+	p_res := make([]*rlwe.Plaintext, len(Pj_c1sShares))
+	res = make([][]int64, len(Pj_c1sShares))
+	ringQ := P.params.RingQ()
+	// Aggregate the shares
+	for i, c1sShare := range Pj_c1sShares {
+		p_res[i] = bfv.NewPlaintext(P.params, Pj_c1sShares[i].Level())
+		// c0 to NTT domain
+		ringQ.NTT(P.c_z[i].Value[0], p_res[i].Value)
+		// Add Σ c1s_i
+		ringQ.Add(P.c1sShares[i].Value, p_res[i].Value, p_res[i].Value) // + c1s_0   <NTT>
+		ringQ.Add(c1sShare.Value, p_res[i].Value, p_res[i].Value)       // + c1s_1   <NTT>
+		// Mod Q
+		ringQ.Reduce(p_res[i].Value, p_res[i].Value)
+		// Undo NTT
+		ringQ.InvNTT(p_res[i].Value, p_res[i].Value)
+		res[i] = make([]int64, P.params.N())
+		P.encoder.Decode(p_res[i], res[i]) // TODO: avoid two copies
+	}
+	return
+}

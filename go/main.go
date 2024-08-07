@@ -5,16 +5,12 @@ import (
 	"math/rand"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
-	//"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
     "github.com/tuneinsight/lattigo/v4/utils"
 )
 
 func main() {
-    /*
-        READING THE DATA AND TABLE CONVERSION
-    */
-
+    //READING THE DATA AND TABLE CONVERSION
     tab1path := "./lookupTables/Rand/Rand_nB_3_dimF_512.csv"
     tab2path := "./lookupTables/MFIP-Rand/MFIPSubRand_nB_3_dimF_512.csv"
     tab1, err := readCSVToArray(tab1path)
@@ -29,11 +25,9 @@ func main() {
 
     size := len(tab1.([][]int64))
 
-    /*
-        MULTI PARTY MULTI BIP HE
-    */
+    //MULTI PARTY MULTI BIP HE
     paramsDef := bfv.PN13QP218
-    // Set the propper T value instead of a default
+    // Set the propper T value instead of a default later
     paramsDef.T = 0x3ee0001
 
     params, err := bfv.NewParametersFromLiteral(paramsDef)
@@ -41,6 +35,7 @@ func main() {
         fmt.Println(fmt.Errorf(err.Error()))
     }
 
+    // optional key
     crs := []byte("eurecom")
 
     P0 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
@@ -83,7 +78,7 @@ func main() {
     fmt.Println("tab2 encrypted")
     printMatrix(Enrollment.c_Y_2)
 
-    // TODO: Row selection and masking
+    // ROW SELECTION AND MASKING
     selections := []int{rand.Intn(size), rand.Intn(size), rand.Intn(size)}
     fmt.Printf("selections: %v\n", selections)
     tab1selections := selectRows(Enrollment.c_Y_1, selections)
@@ -113,6 +108,21 @@ func main() {
     fmt.Println("result2")
     fmt.Println(result2)
 
-    // TODO: Online phase where we get Gate.x and encrypt it
-    // then send it to the BIP_n c_Y
+    addedResult := BIP1.AddCiphertexts(result1, result2)
+    fmt.Println("Added Result")
+    fmt.Println(addedResult)
+
+    P0.c_z = addedResult
+    P1.c_z = addedResult
+
+    P0.c1sShares = P0.C1ShareDecrypt(P0.c_z)
+    P1.c1sShares = P1.C1ShareDecrypt(P1.c_z)
+
+    fmt.Println("c1sSharesP0")
+    fmt.Println(P0.c1sShares)
+    fmt.Println("c1sSharesP1")
+    fmt.Println(P1.c1sShares)
+
+    //z_0 := P0.AggregateAndDecrypt(P1.c1sShares)
+	//z_1 := P1.AggregateAndDecrypt(P0.c1sShares)
 }
