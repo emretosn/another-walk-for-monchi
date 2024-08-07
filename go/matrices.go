@@ -50,7 +50,6 @@ func flatten[T any](lists [][]T) []T {
 	return res
 }
 
-// We don't need to read borders or float values so you can simplify and refactor (eliminate the valtype since it's always [][]int64
 func readCSVToArray(filename string) (interface{}, error) {
 	file, err := os.Open(filename)
 	if err != nil {

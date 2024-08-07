@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"math/rand"
+	"reflect"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-    "github.com/tuneinsight/lattigo/v4/utils"
+	"github.com/tuneinsight/lattigo/v4/utils"
 )
 
 func main() {
@@ -112,6 +113,16 @@ func main() {
     fmt.Println("Added Result")
     fmt.Println(addedResult)
 
+    //fmt.Println("Added coefs")
+    //for _, res := range addedResult {
+    //    if res != nil {
+    //        fmt.Printf("%v ", res.Value[0])
+    //    } else {
+    //        fmt.Printf("%v ", nil)
+    //    }
+    //}
+
+
     P0.c_z = addedResult
     P1.c_z = addedResult
 
@@ -123,6 +134,9 @@ func main() {
     fmt.Println("c1sSharesP1")
     fmt.Println(P1.c1sShares)
 
-    //z_0 := P0.AggregateAndDecrypt(P1.c1sShares)
-	//z_1 := P1.AggregateAndDecrypt(P0.c1sShares)
+    z_0 := P0.AggregateAndDecrypt(P1.c1sShares)
+    z_1 := P1.AggregateAndDecrypt(P0.c1sShares)
+
+    fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
+    fmt.Println(reflect.DeepEqual(z_0, z_1))
 }

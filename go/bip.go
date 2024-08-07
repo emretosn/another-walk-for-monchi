@@ -163,18 +163,22 @@ func (P *Party_s) AggregateAndDecrypt(Pj_c1sShares []*rlwe.Plaintext) (res [][]i
 	ringQ := P.params.RingQ()
 	// Aggregate the shares
 	for i, c1sShare := range Pj_c1sShares {
-		p_res[i] = bfv.NewPlaintext(P.params, Pj_c1sShares[i].Level())
-		// c0 to NTT domain
-		ringQ.NTT(P.c_z[i].Value[0], p_res[i].Value)
-		// Add Σ c1s_i
-		ringQ.Add(P.c1sShares[i].Value, p_res[i].Value, p_res[i].Value) // + c1s_0   <NTT>
-		ringQ.Add(c1sShare.Value, p_res[i].Value, p_res[i].Value)       // + c1s_1   <NTT>
-		// Mod Q
-		ringQ.Reduce(p_res[i].Value, p_res[i].Value)
-		// Undo NTT
-		ringQ.InvNTT(p_res[i].Value, p_res[i].Value)
-		res[i] = make([]int64, P.params.N())
-		P.encoder.Decode(p_res[i], res[i]) // TODO: avoid two copies
+        if c1sShare != nil {
+            p_res[i] = bfv.NewPlaintext(P.params, Pj_c1sShares[i].Level())
+            // c0 to NTT domain
+            ringQ.NTT(P.c_z[i].Value[0], p_res[i].Value)
+            // Add Σ c1s_i
+            ringQ.Add(P.c1sShares[i].Value, p_res[i].Value, p_res[i].Value) // + c1s_0   <NTT>
+            ringQ.Add(c1sShare.Value, p_res[i].Value, p_res[i].Value)       // + c1s_1   <NTT>
+            // Mod Q
+            ringQ.Reduce(p_res[i].Value, p_res[i].Value)
+            // Undo NTT
+            ringQ.InvNTT(p_res[i].Value, p_res[i].Value)
+            res[i] = make([]int64, P.params.N())
+            P.encoder.Decode(p_res[i], res[i]) // TODO: avoid two copies
+        } else {
+            res[i] = nil
+        }
 	}
 	return
 }
