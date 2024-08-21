@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"reflect"
+	//"reflect"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
@@ -30,6 +30,8 @@ func main() {
     paramsDef := bfv.PN13QP218
     // Set the propper T value instead of a default later
     paramsDef.T = 0x3ee0001
+    // Setting Correct N
+    paramsDef.LogN = 13
 
     params, err := bfv.NewParametersFromLiteral(paramsDef)
     if err != nil {
@@ -62,81 +64,97 @@ func main() {
 	evk := rlwe.EvaluationKey{Rlk: rlk, Rtks: nil}
 
     Enrollment := &Enrollment_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil, nil, nil}
-	BIP1 := &BIP_s{params, bfv.NewEvaluator(params, evk), nil, nil, nil}
-	BIP2 := &BIP_s{params, bfv.NewEvaluator(params, evk), nil, nil, nil}
-	//Gate := &Gate_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil, nil}
+	BIP0 := &BIP_s{params, bfv.NewEvaluator(params, evk), nil, nil , nil}
+	BIP1 := &BIP_s{params, bfv.NewEvaluator(params, evk), nil, nil , nil}
+	Gate := &Gate_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil, nil, nil}
+
 
     Enrollment.Y_1 = tab1.([][]int64)
     Enrollment.Y_2 = tab2.([][]int64)
-	Enrollment.c_Y_1 = Enrollment.EncryptInput(Enrollment.Y_1)
-	Enrollment.c_Y_2 = Enrollment.EncryptInput(Enrollment.Y_2)
-    BIP1.c_Y = Enrollment.c_Y_1
-    BIP2.c_Y = Enrollment.c_Y_2
-
-    fmt.Println("tab1 encrypted")
-    printMatrix(Enrollment.c_Y_1)
-
-    fmt.Println("tab2 encrypted")
-    printMatrix(Enrollment.c_Y_2)
 
     // ROW SELECTION AND MASKING
     selections := []int{rand.Intn(size), rand.Intn(size), rand.Intn(size)}
     fmt.Printf("selections: %v\n", selections)
-    tab1selections := selectRows(Enrollment.c_Y_1, selections)
-    tab2selections := selectRows(Enrollment.c_Y_2, selections)
+
+    tab1selections := selectRows(Enrollment.Y_1, selections)
+    tab2selections := selectRows(Enrollment.Y_2, selections)
 
     fmt.Println("selection1")
     printMatrix(tab1selections)
     fmt.Println("selection2")
     printMatrix(tab2selections)
 
-
-    b := genRandInexes(len(selections), size)
-	fmt.Println("Selected Columns", b)
-
-    bmap := genIndexMaps(b, size)
-
     tab1selectionsFlat := flatten(tab1selections)
     tab2selectionsFlat := flatten(tab2selections)
-    bmapFlat := flatten(bmap)
-    fmt.Println("Flat mask:", bmapFlat)
+    fmt.Println("tab1selectionsFlat")
+    fmt.Println(tab1selectionsFlat)
+    fmt.Println("tab2selectionsFlat")
+    fmt.Println(tab2selectionsFlat)
 
-    result1 := compFlatRowsTimesMasks(tab1selectionsFlat, bmapFlat)
-    result2 := compFlatRowsTimesMasks(tab2selectionsFlat, bmapFlat)
+    //tab1selectionsFlatC := Enrollment.EncryptFlatSingle(tab1selectionsFlat)
+    //tab2selectionsFlatC := Enrollment.EncryptFlatSingle(tab2selectionsFlat)
+    ptxt1 := Enrollment.encoder.EncodeNew(tab1selectionsFlat, params.MaxLevel())
+    tab1selectionsFlatC := Enrollment.encryptor.EncryptNew(ptxt1)
 
-    fmt.Println("result1")
-    fmt.Println(result1)
-    fmt.Println("result2")
-    fmt.Println(result2)
+    ptxt2 := Enrollment.encoder.EncodeNew(tab1selectionsFlat, params.MaxLevel())
+    tab2selectionsFlatC := Enrollment.encryptor.EncryptNew(ptxt2)
 
-    addedResult := BIP1.AddCiphertexts(result1, result2)
-    fmt.Println("Added Result")
-    fmt.Println(addedResult)
+    //fmt.Println("tab1selectionsFlatC")
+    //fmt.Println(tab1selectionsFlatC)
+    //fmt.Println("tab2selectionsFlatC")
+    //fmt.Println(tab2selectionsFlatC)
+    finalScorePT := P0.decryptor.DecryptNew(tab2selectionsFlatC)
+    finalScoreVec := Enrollment.encoder.DecodeUintNew(finalScorePT)
+    fmt.Println("decoded ta1FC", finalScoreVec[:50])
 
-    //fmt.Println("Added coefs")
-    //for _, res := range addedResult {
-    //    if res != nil {
-    //        fmt.Printf("%v ", res.Value[0])
-    //    } else {
-    //        fmt.Printf("%v ", nil)
-    //    }
-    //}
+    finalScorePT = P0.decryptor.DecryptNew(tab2selectionsFlatC)
+    finalScoreVec = Enrollment.encoder.DecodeUintNew(finalScorePT)
+    fmt.Println("decoded ta2FC", finalScoreVec[:50])
 
+    BIP0.c_selection = tab1selectionsFlatC
+    BIP1.c_selection = tab2selectionsFlatC
 
-    P0.c_z = addedResult
-    P1.c_z = addedResult
+    // Do this in gate and encrypt it
+    b := genRandInexes(len(selections), size)
+	fmt.Println("Selected Columns", b)
+    bmapFlat := genFlatIndexMaps(b, size)
+    Gate.col_selection = bmapFlat
+    fmt.Println("Flat mask:", Gate.col_selection)
 
-    P0.c1sShares = P0.C1ShareDecrypt(P0.c_z)
-    P1.c1sShares = P1.C1ShareDecrypt(P1.c_z)
+    FinalScore1 := P0.getFinalScoreCT(BIP0, Gate.col_selection)
+    FinalScore2 := P1.getFinalScoreCT(BIP1, Gate.col_selection)
 
-    fmt.Println("c1sSharesP0")
-    fmt.Println(P0.c1sShares)
-    fmt.Println("c1sSharesP1")
-    fmt.Println(P1.c1sShares)
+    fmt.Println("FinalScore1", FinalScore1)
+    fmt.Println("FinalScore2", FinalScore2)
 
-    z_0 := P0.AggregateAndDecrypt(P1.c1sShares)
-    z_1 := P1.AggregateAndDecrypt(P0.c1sShares)
+    // Does bip do this or should the parties do this
+    //result1 := BIP0.compCFlatRowsTimesMasks(BIP0.c_selection, Gate.col_selection)
+    //result2 := BIP1.compCFlatRowsTimesMasks(BIP1.c_selection, Gate.col_selection)
 
-    fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
-    fmt.Println(reflect.DeepEqual(z_0, z_1))
+    //fmt.Println("result1")
+    //fmt.Println(result1)
+    //fmt.Println("result2")
+    //fmt.Println(result2)
+
+    //// Add The ciphertexts
+    //addedResult := BIP0.AddCiphertexts(result1, result2)
+    //fmt.Println("Added Result")
+    //fmt.Println(addedResult)
+
+    //P0.c_z = addedResult
+    //P1.c_z = addedResult
+
+    //P0.c1sShares = P0.C1ShareDecrypt(P0.c_z)
+    //P1.c1sShares = P1.C1ShareDecrypt(P1.c_z)
+
+    //fmt.Println("c1sSharesP0")
+    //fmt.Println(P0.c1sShares)
+    //fmt.Println("c1sSharesP1")
+    //fmt.Println(P1.c1sShares)
+
+    //z_0 := P0.AggregateAndDecrypt(P1.c1sShares)
+    //z_1 := P1.AggregateAndDecrypt(P0.c1sShares)
+
+    //fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
+    //fmt.Println(reflect.DeepEqual(z_0, z_1))
 }

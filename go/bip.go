@@ -1,6 +1,11 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+    "math"
+    "math/bits"
+
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/dbfv"
 	"github.com/tuneinsight/lattigo/v4/drlwe"
@@ -20,20 +25,21 @@ type Enrollment_s struct {
 }
 
 type BIP_s struct {
-	params    bfv.Parameters
-	evaluator bfv.Evaluator
-	c_Y       [][]*rlwe.Ciphertext
-	c_x       []*rlwe.Ciphertext
-	c_z       []*rlwe.Ciphertext
+	params      bfv.Parameters
+	evaluator   bfv.Evaluator
+	c_Y         [][]*rlwe.Ciphertext
+	c_x         []*rlwe.Ciphertext
+    c_selection *rlwe.Ciphertext
 }
 
 type Gate_s struct {
-	params    bfv.Parameters
-	encoder   bfv.Encoder
-	encryptor rlwe.Encryptor
-	x         []int64
-	c_x       []*rlwe.Ciphertext
-	c_z       []*rlwe.Ciphertext
+	params          bfv.Parameters
+	encoder         bfv.Encoder
+	encryptor       rlwe.Encryptor
+	x               []int64
+	c_x             []*rlwe.Ciphertext
+    col_selection   []int64
+    c_col_selection []*rlwe.Ciphertext
 }
 
 type Party_s struct {
@@ -120,6 +126,61 @@ func (Enrollment *Enrollment_s) EncryptInput(Y [][]int64) (c_Y [][]*rlwe.Ciphert
 	return
 }
 
+func (Enrollment *Enrollment_s) EncryptFlat(x []int64) (c_x []*rlwe.Ciphertext) {
+	l := len(x)
+	c_x = make([]*rlwe.Ciphertext, l)
+	rep_x := make([]int64, Enrollment.params.N())
+	ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
+	for i := range c_x {
+		c_x[i] = bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
+		for j := range rep_x {
+			rep_x[j] = x[i]
+		}
+		Enrollment.encoder.Encode(rep_x, ptxt)
+		Enrollment.encryptor.Encrypt(ptxt, c_x[i])
+	}
+	return
+}
+
+// TODO: Modify to allow multiple ciphertexts
+func (Enrollment *Enrollment_s) EncryptFlatSingle(x []int64) *rlwe.Ciphertext {
+    l := len(x)
+
+    ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
+    ciphertext := bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
+
+    if l > Enrollment.params.N() {
+        fmt.Println(errors.New("Input vector too large for plaintext"))
+        // TODO: If l too large for N then
+    }
+
+    rep_x := make([]int64, Enrollment.params.N())
+    for i:=0; i<l; i++ {
+        rep_x[i] = x[i]
+    }
+
+    Enrollment.encoder.Encode(rep_x, ptxt)
+    Enrollment.encryptor.Encrypt(ptxt, ciphertext)
+
+    return ciphertext
+}
+
+func (Gate *Gate_s) EncryptInput(x []int64) (c_x []*rlwe.Ciphertext) {
+	l := len(x)
+	c_x = make([]*rlwe.Ciphertext, l)
+	rep_x := make([]int64, Gate.params.N())
+	ptxt := bfv.NewPlaintext(Gate.params, Gate.params.MaxLevel())
+	for i := range c_x {
+		c_x[i] = bfv.NewCiphertext(Gate.params, 1, Gate.params.MaxLevel())
+		for j := range rep_x {
+			rep_x[j] = x[i]
+		}
+		Gate.encoder.Encode(rep_x, ptxt)
+		Gate.encryptor.Encrypt(ptxt, c_x[i])
+	}
+	return
+}
+
 func (BIP *BIP_s) AddCiphertexts(c_Y_1, c_Y_2 []*rlwe.Ciphertext) (c_Y_Sum []*rlwe.Ciphertext) {
 	c_Y_Sum = make([]*rlwe.Ciphertext, len(c_Y_1))
 	for i := range c_Y_1 {
@@ -156,7 +217,6 @@ func (P *Party_s) C1ShareDecrypt(c_z []*rlwe.Ciphertext) []*rlwe.Plaintext {
 	return P.c1sShares
 }
 
-// TODO: integrate
 func (P *Party_s) AggregateAndDecrypt(Pj_c1sShares []*rlwe.Plaintext) (res [][]int64) {
 	p_res := make([]*rlwe.Plaintext, len(Pj_c1sShares))
 	res = make([][]int64, len(Pj_c1sShares))
@@ -182,3 +242,42 @@ func (P *Party_s) AggregateAndDecrypt(Pj_c1sShares []*rlwe.Plaintext) (res [][]i
 	}
 	return
 }
+
+func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
+    ringDim := Party.params.N()
+    halfRing := ringDim / 2
+    fmt.Println(ringDim)
+
+    fmt.Println(len(permProbeTempMask))
+
+    permProbeTempMaskPT := bfv.NewPlaintext(Party.params, Party.params.MaxLevel())
+    Party.encoder.Encode(permProbeTempMask, permProbeTempMaskPT)
+
+    finalScoreCT := BIP.evaluator.MulNew(BIP.c_selection, permProbeTempMaskPT)
+    fmt.Println("finalScoreCT")
+    finalScorePT := Party.decryptor.DecryptNew(finalScoreCT)
+    finalScoreVec := Party.encoder.DecodeUintNew(finalScorePT)
+    fmt.Println(finalScoreVec[:15], len(finalScoreVec))
+
+    fmt.Println(bits.Len64(uint64(halfRing)))
+    for i := 0; i < bits.Len64(uint64(halfRing))-1; i++ {
+		rotation := int(math.Pow(2, float64(i)))
+        fmt.Println(rotation)
+
+		rotatedCT := BIP.evaluator.RotateColumnsNew(finalScoreCT, rotation)
+		BIP.evaluator.Add(finalScoreCT, rotatedCT, finalScoreCT)
+
+        fmt.Println("finalScorerotCT")
+        finalScorerotPT := Party.decryptor.DecryptNew(rotatedCT)
+        finalScorerotVec := Party.encoder.DecodeUintNew(finalScorerotPT)
+        fmt.Println(finalScorerotVec[:16])
+
+        fmt.Println("finalScoreCT")
+        finalScorePT := Party.decryptor.DecryptNew(finalScoreCT)
+        finalScoreVec := Party.encoder.DecodeUintNew(finalScorePT)
+        fmt.Println(finalScoreVec[:16])
+	}
+
+	return finalScoreCT
+}
+

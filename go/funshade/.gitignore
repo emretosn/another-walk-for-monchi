@@ -1,0 +1,7 @@
+.ipynb_checkpoints
+*.egg-info
+build/
+ext/
+.vscode/
+
+funshade/py/*.c
