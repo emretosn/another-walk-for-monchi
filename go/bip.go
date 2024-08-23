@@ -3,8 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-    "math"
-    "math/bits"
+	"math"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/dbfv"
@@ -27,8 +26,8 @@ type Enrollment_s struct {
 type BIP_s struct {
 	params      bfv.Parameters
 	evaluator   bfv.Evaluator
-	c_Y         [][]*rlwe.Ciphertext
-	c_x         []*rlwe.Ciphertext
+	//c_Y         [][]*rlwe.Ciphertext
+	//c_x         []*rlwe.Ciphertext
     c_selection *rlwe.Ciphertext
 }
 
@@ -55,8 +54,11 @@ type Party_s struct {
 	rlkEphemSk  *rlwe.SecretKey
 	rkgShareOne *drlwe.RKGShare
 	rkgShareTwo *drlwe.RKGShare
+    rtgShare    *drlwe.RTGShare
 	c_z         []*rlwe.Ciphertext
+	c_z_1       *rlwe.Ciphertext
 	c1sShares   []*rlwe.Plaintext
+    c1sShare    *rlwe.Plaintext
 }
 
 func ColPubKeyGen(PPool []*Party_s) *rlwe.PublicKey {
@@ -104,6 +106,29 @@ func ColRelinKeyGen(PPool []*Party_s) (rlk *rlwe.RelinearizationKey) {
 	return
 }
 
+func ColRotKeyGen(PPool []*Party_s) (rotKeySet *rlwe.RotationKeySet) {
+	rtg := dbfv.NewRTGProtocol(PPool[0].params)
+	galEls := PPool[0].params.GaloisElementsForRowInnerSum()
+
+	rotKeySet = rlwe.NewRotationKeySet(PPool[0].params.Parameters, galEls)
+
+	for _, galEl := range galEls {
+		rtgShareCombined := rtg.AllocateShare()
+		crp := rtg.SampleCRP(PPool[0].corr_prng)
+
+		for _, pi := range PPool {
+			pi.rtgShare = rtg.AllocateShare()
+			rtg.GenShare(pi.sk, galEl, crp, pi.rtgShare)
+		}
+		for _, pi := range PPool {
+			rtg.AggregateShares(pi.rtgShare, rtgShareCombined, rtgShareCombined)
+		}
+		rtg.GenRotationKey(rtgShareCombined, crp, rotKeySet.Keys[galEl])
+	}
+	return
+}
+
+
 func (Enrollment *Enrollment_s) EncryptInput(Y [][]int64) (c_Y [][]*rlwe.Ciphertext) {
 	K := len(Y)
 	l := len(Y[0])
@@ -126,43 +151,19 @@ func (Enrollment *Enrollment_s) EncryptInput(Y [][]int64) (c_Y [][]*rlwe.Ciphert
 	return
 }
 
-func (Enrollment *Enrollment_s) EncryptFlat(x []int64) (c_x []*rlwe.Ciphertext) {
-	l := len(x)
-	c_x = make([]*rlwe.Ciphertext, l)
-	rep_x := make([]int64, Enrollment.params.N())
-	ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
-	for i := range c_x {
-		c_x[i] = bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
-		for j := range rep_x {
-			rep_x[j] = x[i]
-		}
-		Enrollment.encoder.Encode(rep_x, ptxt)
-		Enrollment.encryptor.Encrypt(ptxt, c_x[i])
-	}
-	return
-}
-
 // TODO: Modify to allow multiple ciphertexts
-func (Enrollment *Enrollment_s) EncryptFlatSingle(x []int64) *rlwe.Ciphertext {
-    l := len(x)
-
-    ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
-    ciphertext := bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
-
-    if l > Enrollment.params.N() {
-        fmt.Println(errors.New("Input vector too large for plaintext"))
+func (Enrollment *Enrollment_s) EncryptFlatSingle(input []int64) *rlwe.Ciphertext {
+    if l := len(input); l > Enrollment.params.N() {
+        fmt.Println(errors.New("Input vector too large for one ciphertext"))
         // TODO: If l too large for N then
     }
 
-    rep_x := make([]int64, Enrollment.params.N())
-    for i:=0; i<l; i++ {
-        rep_x[i] = x[i]
-    }
+    ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
+    Enrollment.encoder.Encode(input, ptxt)
+    ctxt := bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
+    Enrollment.encryptor.Encrypt(ptxt, ctxt)
 
-    Enrollment.encoder.Encode(rep_x, ptxt)
-    Enrollment.encryptor.Encrypt(ptxt, ciphertext)
-
-    return ciphertext
+    return ctxt
 }
 
 func (Gate *Gate_s) EncryptInput(x []int64) (c_x []*rlwe.Ciphertext) {
@@ -193,91 +194,111 @@ func (BIP *BIP_s) AddCiphertexts(c_Y_1, c_Y_2 []*rlwe.Ciphertext) (c_Y_Sum []*rl
 	return
 }
 
+func (BIP *BIP_s) AddCiphertextsSingle(c_Y_1, c_Y_2 *rlwe.Ciphertext) (c_Y_Sum *rlwe.Ciphertext) {
+    c_Y_Sum = BIP.evaluator.AddNew(c_Y_1, c_Y_2)
+	return
+}
+
 func (P *Party_s) C1ShareDecrypt(c_z []*rlwe.Ciphertext) []*rlwe.Plaintext {
 	P.c1sShares = make([]*rlwe.Plaintext, len(c_z))
 	ringQ := P.params.RingQ()
 	sigma := P.params.Sigma()
-	for i := range c_z {
-		if c_z[i] != nil {
-			P.c1sShares[i] = bfv.NewPlaintext(P.params, c_z[i].Level())
-			// c1 to NTT domain
-			ringQ.NTT(c_z[i].Value[1], P.c1sShares[i].Value)
-			// c1 * sk    <NTT domain>
-			ringQ.MulCoeffsMontgomery(c_z[i].Value[1], P.sk.Value.Q, P.c1sShares[i].Value)
-			// + ei
-			GaussianSampler := ring.NewGaussianSampler(P.prng, ringQ, sigma, int(6*sigma))
-			ei := GaussianSampler.ReadNew()
-			ringQ.NTTLazy(ei, ei)
-			// c1 * sk + ei <NTT domain>
-			ringQ.Add(P.c1sShares[i].Value, ei, P.c1sShares[i].Value)
-		} else {
-			P.c1sShares[i] = nil
-		}
-	}
+    for i := range c_z {
+        P.c1sShares[i] = bfv.NewPlaintext(P.params, c_z[i].Level())
+        // c1 to NTT domain
+        ringQ.NTT(c_z[i].Value[1], P.c1sShares[i].Value)
+        // c1 * sk    <NTT domain>
+        ringQ.MulCoeffsMontgomery(c_z[i].Value[1], P.sk.Value.Q, P.c1sShares[i].Value)
+        // + ei
+        GaussianSampler := ring.NewGaussianSampler(P.prng, ringQ, sigma, int(6*sigma))
+        ei := GaussianSampler.ReadNew()
+        ringQ.NTTLazy(ei, ei)
+        // c1 * sk + ei <NTT domain>
+        ringQ.Add(P.c1sShares[i].Value, ei, P.c1sShares[i].Value)
+    }
 	return P.c1sShares
 }
 
 func (P *Party_s) AggregateAndDecrypt(Pj_c1sShares []*rlwe.Plaintext) (res [][]int64) {
-	p_res := make([]*rlwe.Plaintext, len(Pj_c1sShares))
-	res = make([][]int64, len(Pj_c1sShares))
-	ringQ := P.params.RingQ()
-	// Aggregate the shares
-	for i, c1sShare := range Pj_c1sShares {
-        if c1sShare != nil {
-            p_res[i] = bfv.NewPlaintext(P.params, Pj_c1sShares[i].Level())
-            // c0 to NTT domain
-            ringQ.NTT(P.c_z[i].Value[0], p_res[i].Value)
-            // Add Σ c1s_i
-            ringQ.Add(P.c1sShares[i].Value, p_res[i].Value, p_res[i].Value) // + c1s_0   <NTT>
-            ringQ.Add(c1sShare.Value, p_res[i].Value, p_res[i].Value)       // + c1s_1   <NTT>
-            // Mod Q
-            ringQ.Reduce(p_res[i].Value, p_res[i].Value)
-            // Undo NTT
-            ringQ.InvNTT(p_res[i].Value, p_res[i].Value)
-            res[i] = make([]int64, P.params.N())
-            P.encoder.Decode(p_res[i], res[i]) // TODO: avoid two copies
-        } else {
-            res[i] = nil
-        }
-	}
+    p_res := make([]*rlwe.Plaintext, len(Pj_c1sShares))
+    res = make([][]int64, len(Pj_c1sShares))
+    ringQ := P.params.RingQ()
+    // Aggregate the shares
+    for i, c1sShare := range Pj_c1sShares {
+        p_res[i] = bfv.NewPlaintext(P.params, Pj_c1sShares[i].Level())
+        // c0 to NTT domain
+        ringQ.NTT(P.c_z[i].Value[0], p_res[i].Value)
+        // Add Σ c1s_i
+        ringQ.Add(P.c1sShares[i].Value, p_res[i].Value, p_res[i].Value) // + c1s_0   <NTT>
+        ringQ.Add(c1sShare.Value, p_res[i].Value, p_res[i].Value)       // + c1s_1   <NTT>
+        // Mod Q
+        ringQ.Reduce(p_res[i].Value, p_res[i].Value)
+        // Undo NTT
+        ringQ.InvNTT(p_res[i].Value, p_res[i].Value)
+        res[i] = make([]int64, P.params.N())
+        P.encoder.Decode(p_res[i], res[i]) // TODO: avoid two copies
+    }
+    return
+}
+
+func (P *Party_s) C1ShareDecryptSingle(c_z *rlwe.Ciphertext) *rlwe.Plaintext {
+    P.c1sShare = bfv.NewPlaintext(P.params, c_z.Level())
+
+    ringQ := P.params.RingQ()
+    sigma := P.params.Sigma()
+
+    // c1 to NTT domain
+    ringQ.NTT(c_z.Value[1], P.c1sShare.Value)
+    // c1 * sk    <NTT domain>
+    ringQ.MulCoeffsMontgomery(c_z.Value[1], P.sk.Value.Q, P.c1sShare.Value)
+    // + ei
+    GaussianSampler := ring.NewGaussianSampler(P.prng, ringQ, sigma, int(6*sigma))
+    ei := GaussianSampler.ReadNew()
+    ringQ.NTTLazy(ei, ei)
+    // c1 * sk + ei <NTT domain>
+    ringQ.Add(P.c1sShare.Value, ei, P.c1sShare.Value)
+
+    return P.c1sShare
+}
+
+func (P *Party_s) AggregateAndDecryptSingle(Pj_c1sShare *rlwe.Plaintext) (res []int64) {
+    p_res := bfv.NewPlaintext(P.params, Pj_c1sShare.Level())
+    res = make([]int64, P.params.N())
+    ringQ := P.params.RingQ()
+    // Aggregate the shares
+    // c0 to NTT domain
+    ringQ.NTT(P.c_z_1.Value[0], p_res.Value) // INITIALIZE THIS CZ1
+    // Add Σ c1s_i
+    ringQ.Add(P.c1sShare.Value, p_res.Value, p_res.Value)  // + c1s_0   <NTT>
+    ringQ.Add(Pj_c1sShare.Value, p_res.Value, p_res.Value) // + c1s_1   <NTT>
+    // Mod Q
+    ringQ.Reduce(p_res.Value, p_res.Value)
+    // Undo NTT
+    ringQ.InvNTT(p_res.Value, p_res.Value)
+    P.encoder.Decode(p_res, res) // TODO: avoid two copies
+
 	return
 }
 
 func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
     ringDim := Party.params.N()
-    halfRing := ringDim / 2
-    fmt.Println(ringDim)
+    halfRing := float64(ringDim / 2)
 
-    fmt.Println(len(permProbeTempMask))
-
-    permProbeTempMaskPT := bfv.NewPlaintext(Party.params, Party.params.MaxLevel())
-    Party.encoder.Encode(permProbeTempMask, permProbeTempMaskPT)
-
+    permProbeTempMaskPT := Party.optimizedPlaintextMul(permProbeTempMask)
     finalScoreCT := BIP.evaluator.MulNew(BIP.c_selection, permProbeTempMaskPT)
-    fmt.Println("finalScoreCT")
-    finalScorePT := Party.decryptor.DecryptNew(finalScoreCT)
-    finalScoreVec := Party.encoder.DecodeUintNew(finalScorePT)
-    fmt.Println(finalScoreVec[:15], len(finalScoreVec))
 
-    fmt.Println(bits.Len64(uint64(halfRing)))
-    for i := 0; i < bits.Len64(uint64(halfRing))-1; i++ {
+    for i := 0; i < int(math.Log2(halfRing)); i++ {
 		rotation := int(math.Pow(2, float64(i)))
-        fmt.Println(rotation)
 
-		rotatedCT := BIP.evaluator.RotateColumnsNew(finalScoreCT, rotation)
+		rotatedCT := BIP.evaluator.RotateColumnsNew(BIP.c_selection, rotation)
 		BIP.evaluator.Add(finalScoreCT, rotatedCT, finalScoreCT)
-
-        fmt.Println("finalScorerotCT")
-        finalScorerotPT := Party.decryptor.DecryptNew(rotatedCT)
-        finalScorerotVec := Party.encoder.DecodeUintNew(finalScorerotPT)
-        fmt.Println(finalScorerotVec[:16])
-
-        fmt.Println("finalScoreCT")
-        finalScorePT := Party.decryptor.DecryptNew(finalScoreCT)
-        finalScoreVec := Party.encoder.DecodeUintNew(finalScorePT)
-        fmt.Println(finalScoreVec[:16])
 	}
 
 	return finalScoreCT
 }
 
+func (Party *Party_s) optimizedPlaintextMul(arr []int64) *bfv.PlaintextMul {
+    plainMask := bfv.NewPlaintextMul(Party.params, Party.params.MaxLevel())
+    Party.encoder.EncodeMul(arr, plainMask)
+    return plainMask
+}

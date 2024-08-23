@@ -1,6 +1,10 @@
 package main
 
-import "github.com/tuneinsight/lattigo/v4/rlwe"
+import (
+	"fmt"
+
+	"github.com/tuneinsight/lattigo/v4/rlwe"
+)
 
 func selectRows[T any](tableMFBR [][]T, selections []int) [][]T {
     A := make([][]T, len(selections))
@@ -19,10 +23,10 @@ func genFlatIndexMaps(indexes []int64, cols int) []int64 {
 }
 
 // Clear row selection to clear probe mask
-func (BIP *BIP_s) compFlatRowsTimesMasks(A []int64, b []uint64) []int64 {
+func compFlatRowsTimesMasks(A, b []int64) []int64 {
     result := make([]int64, len(A))
     for i := range A {
-        result[i] = A[i] * int64(b[i])
+        result[i] = A[i] * b[i]
     }
     return result
 }
@@ -46,3 +50,18 @@ func (BIP *BIP_s) compCCFlatRowsTimesMasks(A, b []*rlwe.Ciphertext) []*rlwe.Ciph
     }
     return result
 }
+
+func testProtocol(live0, live1, ref []int64, r0, r1 int) int {
+    p1 := compFlatRowsTimesMasks(live0, ref)
+    p2 := compFlatRowsTimesMasks(live1, ref)
+
+    fmt.Println(p1)
+    fmt.Println(p2)
+
+    sum := 0
+    for i := range p1 {
+        sum += int(p1[i] + p2[i])
+    }
+    return sum + r0 + r1
+}
+
