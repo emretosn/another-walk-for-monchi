@@ -55,6 +55,7 @@ type Party_s struct {
 	rkgShareOne *drlwe.RKGShare
 	rkgShareTwo *drlwe.RKGShare
     rtgShare    *drlwe.RTGShare
+    cksShare    *drlwe.CKSShare
 	c_z         []*rlwe.Ciphertext
 	c_z_1       *rlwe.Ciphertext
 	c1sShares   []*rlwe.Plaintext
@@ -280,20 +281,19 @@ func (P *Party_s) AggregateAndDecryptSingle(Pj_c1sShare *rlwe.Plaintext) (res []
 	return
 }
 
-func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
+func (Party *Party_s) getFinalScoreCT(PPool []*Party_s, BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
     ringDim := Party.params.N()
     halfRing := float64(ringDim / 2)
 
     permProbeTempMaskPT := Party.optimizedPlaintextMul(permProbeTempMask)
     finalScoreCT := BIP.evaluator.MulNew(BIP.c_selection, permProbeTempMaskPT)
 
-    for i := 0; i < int(math.Log2(halfRing)); i++ {
+    for i := 0; i < int(math.Log2(float64(halfRing))); i++ {
 		rotation := int(math.Pow(2, float64(i)))
 
-		rotatedCT := BIP.evaluator.RotateColumnsNew(BIP.c_selection, rotation)
+		rotatedCT := BIP.evaluator.RotateColumnsNew(finalScoreCT, rotation)
 		BIP.evaluator.Add(finalScoreCT, rotatedCT, finalScoreCT)
 	}
-
 	return finalScoreCT
 }
 
@@ -302,3 +302,29 @@ func (Party *Party_s) optimizedPlaintextMul(arr []int64) *bfv.PlaintextMul {
     Party.encoder.EncodeMul(arr, plainMask)
     return plainMask
 }
+
+func CKSDecrypt(params bfv.Parameters, P []*Party_s, result *rlwe.Ciphertext) *rlwe.Ciphertext {
+	cks := dbfv.NewCKSProtocol(params, 3.19) // Collective public-key re-encryption
+
+	for _, pi := range P {
+        // Define in the main too !!!
+		pi.cksShare = cks.AllocateShare(params.MaxLevel())
+	}
+
+	zero := rlwe.NewSecretKey(params.Parameters)
+	cksCombined := cks.AllocateShare(params.MaxLevel())
+
+    for _, pi := range P[1:] {
+        cks.GenShare(pi.sk, zero, result, pi.cksShare)
+    }
+
+	encOut := bfv.NewCiphertext(params, 1, params.MaxLevel())
+    for _, pi := range P {
+        cks.AggregateShares(pi.cksShare, cksCombined, cksCombined)
+    }
+    cks.KeySwitch(result, cksCombined, encOut)
+
+	return encOut
+}
+
+

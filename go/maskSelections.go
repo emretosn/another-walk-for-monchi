@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 )
 
@@ -54,9 +52,6 @@ func (BIP *BIP_s) compCCFlatRowsTimesMasks(A, b []*rlwe.Ciphertext) []*rlwe.Ciph
 func testProtocol(live0, live1, ref []int64, r0, r1 int) int {
     p1 := compFlatRowsTimesMasks(live0, ref)
     p2 := compFlatRowsTimesMasks(live1, ref)
-
-    fmt.Println(p1)
-    fmt.Println(p2)
 
     sum := 0
     for i := range p1 {

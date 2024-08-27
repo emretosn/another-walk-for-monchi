@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"reflect"
+	//"reflect"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
@@ -12,8 +12,8 @@ import (
 
 func main() {
     //READING THE DATA AND TABLE CONVERSION
-    tab1path := "./lookupTables/Rand/Rand_nB_3_dimF_512.csv"
-    tab2path := "./lookupTables/MFIP-Rand/MFIPSubRand_nB_3_dimF_512.csv"
+    tab1path := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
+    tab2path := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
     tab1, err := readCSVToArray(tab1path)
     tab2, err := readCSVToArray(tab2path)
     if err != nil {
@@ -31,7 +31,7 @@ func main() {
     // Set the propper T value instead of a default later
     paramsDef.T = 0x3ee0001
     // Setting Correct N
-    paramsDef.LogN = 13
+    paramsDef.LogN = 9
 
     params, err := bfv.NewParametersFromLiteral(paramsDef)
     if err != nil {
@@ -41,8 +41,8 @@ func main() {
     // optional key
     crs := []byte("eurecom")
 
-    P0 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
-    P1 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
+    P0 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
+    P1 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
     PPool := []*Party_s{P0, P1}
 
     P0.sk = bfv.NewKeyGenerator(P0.params).GenSecretKey()
@@ -73,7 +73,11 @@ func main() {
     Enrollment.Y_2 = tab2.([][]int64)
 
     // ROW SELECTION AND MASKING
-    selections := []int{rand.Intn(size), rand.Intn(size), rand.Intn(size)}
+    selections := make([]int, 0)
+    SELTIMES := 3
+    for i:=0; i<SELTIMES; i++ {
+        selections = append(selections, rand.Intn(size))
+    }
     fmt.Printf("selections: %v\n", selections)
 
     tab1selections := selectRows(Enrollment.Y_1, selections)
@@ -86,13 +90,29 @@ func main() {
 
     tab1selectionsFlat := flatten(tab1selections)
     tab2selectionsFlat := flatten(tab2selections)
+    //tab1selectionsFlat := flatten(tab1.([][]int64))
+    //tab2selectionsFlat := flatten(tab2.([][]int64))
+
     fmt.Println("tab1selectionsFlat")
     fmt.Println(tab1selectionsFlat)
     fmt.Println("tab2selectionsFlat")
     fmt.Println(tab2selectionsFlat)
 
     tab1selectionsFlatC := Enrollment.EncryptFlatSingle(tab1selectionsFlat)
+    encOut := CKSDecrypt(P0.params, PPool, tab1selectionsFlatC)
+	ptres := bfv.NewPlaintext(P0.params, P0.params.MaxLevel())
+	P0.decryptor.Decrypt(encOut, ptres)
+
+	res := P0.encoder.DecodeIntNew(ptres)
+    fmt.Println("tab1selectionsFlat Decr :", res[:50])
+
     tab2selectionsFlatC := Enrollment.EncryptFlatSingle(tab2selectionsFlat)
+    encOut = CKSDecrypt(P1.params, PPool, tab2selectionsFlatC)
+	ptres = bfv.NewPlaintext(P1.params, P1.params.MaxLevel())
+	P0.decryptor.Decrypt(encOut, ptres)
+
+	res = P0.encoder.DecodeIntNew(ptres)
+    fmt.Println("tab2selectionsFlat Decr :", res[:50])
 
     BIP0.c_selection = tab1selectionsFlatC
     BIP1.c_selection = tab2selectionsFlatC
@@ -109,45 +129,35 @@ func main() {
     tPrt := testProtocol(tab1selectionsFlat, tab2selectionsFlat, bmapFlat, r1, r2)
     fmt.Println("Protocol test:", tPrt)
 
-    FinalScore1 := P0.getFinalScoreCT(BIP0, Gate.col_selection)
-    FinalScore2 := P1.getFinalScoreCT(BIP1, Gate.col_selection)
+    FinalScore1 := P0.getFinalScoreCT(PPool, BIP0, Gate.col_selection)
+    FinalScore2 := P1.getFinalScoreCT(PPool, BIP1, Gate.col_selection)
 
-    fmt.Println("FinalScore1", FinalScore1)
-    fmt.Println("FinalScore2", FinalScore2)
+    // Decrypt Final Score 1
+    encOut = CKSDecrypt(P0.params, PPool, FinalScore1)
+    ptres = bfv.NewPlaintext(params, params.MaxLevel())
+	P0.decryptor.Decrypt(encOut, ptres)
 
-    arrFinalScore1 := make([]*rlwe.Ciphertext, 1)
-    arrFinalScore1[0] = FinalScore1
+    res = P0.encoder.DecodeIntNew(ptres)
+    fmt.Println("FinalScore1:", res)
 
-    P0.c_z, P1.c_z = arrFinalScore1, arrFinalScore1
+    // Decrypt Final Score 2
+    //encOut = CKSDecrypt(P1.params, PPool, FinalScore2)
+    //ptres = bfv.NewPlaintext(params, params.MaxLevel())
+	//P0.decryptor.Decrypt(encOut, ptres)
 
-    P0.c1sShares = P0.C1ShareDecrypt(P0.c_z)
-    P1.c1sShares = P1.C1ShareDecrypt(P1.c_z)
-
-    z_0 := P0.AggregateAndDecrypt(P1.c1sShares)
-    z_1 := P1.AggregateAndDecrypt(P0.c1sShares)
-
-    fmt.Println(z_0[0][:20])
-    fmt.Println(z_1[0][:20], len(z_1[0]))
-
-    //fmt.Printf("FinalScore1: %v\nFinalScore2: %v\n", z_0[:100], z_1[:100])
+    //res = P1.encoder.DecodeIntNew(ptres)
+    //fmt.Println("FinalScore2:", res)
 
     addedResult := BIP0.AddCiphertextsSingle(FinalScore1, FinalScore2)
 
-    addedResults := make([]*rlwe.Ciphertext, 1)
-    addedResults[0] = addedResult
-    P0.c_z, P1.c_z = addedResults, addedResults
+    // Decrypt Added Score
+    encOut = CKSDecrypt(P0.params, PPool, addedResult)
+    ptres = bfv.NewPlaintext(params, params.MaxLevel())
+	P0.decryptor.Decrypt(encOut, ptres)
 
-    fmt.Println("finalScoreCT")
-    P0.c1sShares = P0.C1ShareDecrypt(P0.c_z)
-    P1.c1sShares = P1.C1ShareDecrypt(P1.c_z)
+    res = P0.encoder.DecodeIntNew(ptres)
+    fmt.Println("addedResult:", res[:20])
 
-    z0 := P0.AggregateAndDecrypt(P1.c1sShares)
-    z1 := P1.AggregateAndDecrypt(P0.c1sShares)
-
-    fmt.Println(z0[0][:20])
-    fmt.Println(z1[0][:20], len(z1[0]))
-    //fmt.Printf("z0: %v\nz1: %v\n", z0[:100], z1[:100])
-
-    fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
-    fmt.Println(reflect.DeepEqual(z0, z1))
+    //fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
+    //fmt.Println(reflect.DeepEqual(z0, z1))
 }

@@ -74,3 +74,22 @@ func readCSVToArray(filename string) (interface{}, error) {
     }
     return int64Matrix, nil
 }
+
+func quantizeFeatures(borders []float64, unQuantizedFeatures []float64) []int64 {
+	numFeat := len(unQuantizedFeatures)
+	quantizedFeatures := make([]int64, 0, numFeat)
+	lenBorders := len(borders)
+
+	for i := 0; i < numFeat; i++ {
+		feature := unQuantizedFeatures[i]
+		count := 0
+
+		for count < lenBorders && borders[count] <= feature {
+			count++
+		}
+
+		quantizedFeatures = append(quantizedFeatures, int64(count))
+	}
+
+	return quantizedFeatures
+}
