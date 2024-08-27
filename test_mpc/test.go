@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 	//"math/bits"
 	//"math/rand"
 )
@@ -260,8 +261,9 @@ func main() {
 	// fmt.Println("referenceQ", referenceQ)
 
 	liveQ := quantizeFeatures(borders, live)
-	// fmt.Println("liveQ", liveQ)
+	fmt.Println("liveQ", liveQ)
 	//print len of liveQ
+	// take liveQ and multiply each value by
 	// fmt.Println("len(liveQ)", len(liveQ))
 
 	refTemp := refTemplate(referenceQ, mfip)
@@ -281,11 +283,15 @@ func main() {
 	// fmt.Println("share1", share1)
 	// fmt.Println("share2", share2)
 
+	//measure the time it takes to perform the lookups
+	start := time.Now()
 	maskedSore1 := lookupTable(share1, permProbeTemp)
 	maskedScore2 := lookupTable(share2, permProbeTemp)
 	// fmt.Println("lookupTable1", maskedSore1)
 	// fmt.Println("lookupTable2", maskedScore2)
 	result := maskedSore1 + maskedScore2
+	end := time.Now()
+	fmt.Println("Time taken to perform the lookups", end.Sub(start))
 	fmt.Println("result", result)
 
 	resultClear := lookupTable(permRefTemp, permProbeTemp)
