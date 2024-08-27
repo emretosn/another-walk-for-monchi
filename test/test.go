@@ -7,6 +7,7 @@ import (
     "math/rand"
     "encoding/csv"
     "strconv"
+    "sync"
 	//"math/bits"
     //"math/rand"
 
@@ -23,7 +24,7 @@ func (Enrollment *Enrollment_s) optimizedPlaintextMul(arr []int64) *bfv.Plaintex
 func (BIP *BIP_s) getFinalScoreCT(Enrollment *Enrollment_s, permRefTempCT *rlwe.Ciphertext, permProbeTempMask []int64) *rlwe.Ciphertext {
     ringDim := BIP.params.N()
     halfRing := float64(ringDim / 2)
-    fmt.Println("halfRing", halfRing)
+    //fmt.Println("halfRing", halfRing)
 
     permProbeTempMaskPT := Enrollment.optimizedPlaintextMul(permProbeTempMask)
     finalScoreCT := BIP.evaluator.MulNew(permRefTempCT, permProbeTempMaskPT)
@@ -32,7 +33,7 @@ func (BIP *BIP_s) getFinalScoreCT(Enrollment *Enrollment_s, permRefTempCT *rlwe.
 
     finalScoreCT = maskedRefTempCT
 
-    fmt.Println(int(math.Log2(halfRing)))
+    //fmt.Println(int(math.Log2(halfRing)))
     for i := 0; i < int(math.Log2(halfRing)); i++ {
 		rotation := int(math.Pow(2, float64(i)))
 
@@ -208,6 +209,72 @@ func (Enrollment *Enrollment_s) encryptPermutedRefTempSingleCT(refTemp []int64, 
     return ctxt
 }
 
+func getIndexInVect(permutations []int, value int) int {
+	for i, v := range permutations {
+		if v == value {
+			return i
+		}
+	}
+	return -1
+}
+
+func getPermutationsInverse(permutations []int) []int {
+	nLen := len(permutations)
+	permutationsInverse := make([]int, nLen)
+
+	var wg sync.WaitGroup
+	wg.Add(nLen)
+
+	for i := 0; i < nLen; i++ {
+		go func(i int) {
+			defer wg.Done()
+			permutationsInverse[i] = getIndexInVect(permutations, i)
+		}(i)
+	}
+
+	wg.Wait()
+
+	return permutationsInverse
+}
+
+func genPermProbeTemplateFromPermInv(quantizedProb []int64, permutationsInverse []int, lenRow int) []int {
+	dim := len(quantizedProb)
+	permProbeTemp := make([]int, dim)
+
+	var wg sync.WaitGroup
+	wg.Add(dim)
+
+	for i := 0; i < dim; i++ {
+		go func(i int) {
+			defer wg.Done()
+			val := int(quantizedProb[i]) + i*lenRow
+			permProbeTemp[i] = permutationsInverse[val]
+		}(i)
+	}
+
+	wg.Wait()
+	return permProbeTemp
+}
+
+func getPermutedProbeTempMask(permProbeTemp []int, ringDim int) []int64 {
+	nFeat := len(permProbeTemp)
+	permProbeTempMask := make([]int64, ringDim)
+
+	var wg sync.WaitGroup
+	wg.Add(nFeat)
+
+	for i := 0; i < nFeat; i++ {
+		go func(i int) {
+			defer wg.Done()
+			permProbeTempMask[permProbeTemp[i]] = 1
+		}(i)
+	}
+
+	wg.Wait()
+
+	return permProbeTempMask
+}
+
 const SEED  = 54321
 const NFEAT = 128
 const NROWS = 8
@@ -230,16 +297,17 @@ func main() {
         fmt.Println(fmt.Errorf(err.Error()))
     }
 
-    fmt.Println("MFIP", mfip)
+    //fmt.Println("MFIP", mfip)
 
     //fmt.Println(lfw)
     lfwQ := quantizeFeatures(borders, lfw)
-    fmt.Println("LFWQ", lfwQ)
+    //fmt.Println("LFWQ", lfwQ)
 
     refTemp := refTemplate(lfwQ, mfip)
-    fmt.Printf("refTemp %v \n len(refTemp) %v \n", refTemp, len(refTemp))
+    //fmt.Printf("refTemp %v\n", refTemp)
 
     permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
+    permutationsInv := getPermutationsInverse(permutations)
     fmt.Println("permutations", permutations)
 
     // Enryption
@@ -276,5 +344,18 @@ func main() {
     refPerm := Enrollment.encoder.DecodeIntNew(ptxt)
 
     fmt.Println(refPerm)
+
+    lfwProbPath := "../go/data/LFW/Paul_McCartney/1.csv"
+
+    lfwProb, err := readCSVToFloatSlice(lfwProbPath)
+    if err != nil {
+        fmt.Println(fmt.Errorf(err.Error()))
+    }
+    quantizedProb := quantizeFeatures(borders , lfwProb)
+    fmt.Println("quantizedProb", quantizedProb)
+
+    permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProb, permutationsInv, NROWS);
+    permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
+    fmt.Println("permProbeTempMask", permProbeTempMask)
 }
 
