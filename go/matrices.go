@@ -75,21 +75,65 @@ func readCSVToArray(filename string) (interface{}, error) {
     return int64Matrix, nil
 }
 
-func quantizeFeatures(borders []float64, unQuantizedFeatures []float64) []int64 {
-	numFeat := len(unQuantizedFeatures)
-	quantizedFeatures := make([]int64, 0, numFeat)
-	lenBorders := len(borders)
+func readCSVTo2DSlice(filename string) ([][]int64, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("unable to open file: %v", err)
+	}
+	defer file.Close()
 
-	for i := 0; i < numFeat; i++ {
-		feature := unQuantizedFeatures[i]
-		count := 0
+	reader := csv.NewReader(file)
 
-		for count < lenBorders && borders[count] <= feature {
-			count++
+	var result [][]int64
+
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			return nil, fmt.Errorf("unable to read CSV file: %v", err)
 		}
 
-		quantizedFeatures = append(quantizedFeatures, int64(count))
+		var row []int64
+
+		for _, value := range record {
+			intVal, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("unable to parse float value: %v", err)
+			}
+			row = append(row, intVal)
+		}
+		result = append(result, row)
 	}
 
-	return quantizedFeatures
+	return result, nil
 }
+
+func readCSVToFloatSlice(filename string) ([]float64, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("unable to open file: %v", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+
+	record, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("unable to read CSV file: %v", err)
+	}
+
+	var result []float64
+
+	for _, value := range record {
+		floatVal, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse float value: %v", err)
+		}
+		result = append(result, floatVal)
+	}
+
+	return result, nil
+}
+

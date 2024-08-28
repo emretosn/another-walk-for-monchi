@@ -27,7 +27,8 @@ def main():
     dimFlist = [32, 64, 128, 256, 512]
     # Changed from (2,13) to (2,4) for the sake of the demo
     #nBList = np.arange(2,13)
-    nBList = np.arange(2,4)
+    #nBList = np.arange(2,4)
+    nBList = [16]
     nBDimF = product(nBList, dimFlist)
 
     bordersDir = f'./lookupTables/Borders/'

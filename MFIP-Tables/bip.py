@@ -24,7 +24,8 @@ def genStoreRandMFIPSubstRand(nBdimF, tabMFIPdir, tabRanddir, tabMFIPSubRanddir)
     pickle.dump(np.subtract(tabQMFIP, tabShare1), open(f'{tabMFIPSubRanddir}/MFIPSubRand_nB_{nB}_dimF_{dimF}.pkl', 'wb'))
 
 def main():
-    nBList = np.arange(2,4)
+    #nBList = np.arange(2,4)
+    nBList = [16]
     dimFlist = [32, 64, 128, 256, 512]
     nBdimF = product(nBList, dimFlist)
 

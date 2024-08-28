@@ -3,7 +3,7 @@ import csv
 import os
 
 
-directory = '.'
+directory = './John_Lennon'
 
 
 for filename in os.listdir(directory):

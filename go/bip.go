@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+    "math/rand"
+    "sync"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/dbfv"
@@ -327,4 +329,151 @@ func CKSDecrypt(params bfv.Parameters, P []*Party_s, result *rlwe.Ciphertext) *r
 	return encOut
 }
 
+func quantizeFeatures(borders []float64, unQuantizedFeatures []float64) []int64 {
+	numFeat := len(unQuantizedFeatures)
+	quantizedFeatures := make([]int64, 0, numFeat)
+	lenBorders := len(borders)
 
+	for i := 0; i < numFeat; i++ {
+		feature := unQuantizedFeatures[i]
+		count := 0
+
+		for count < lenBorders && borders[count] <= feature {
+			count++
+		}
+
+		quantizedFeatures = append(quantizedFeatures, int64(count))
+	}
+
+	return quantizedFeatures
+}
+
+func refTemplate(sampleQ []int64, mfbrTab [][]int64) []int64 {
+    var refTempPacked []int64
+    for _, i := range sampleQ {
+        refTemp := mfbrTab[i]
+        refTempPacked = append(refTempPacked, refTemp...)
+    }
+    return refTempPacked
+}
+
+func genVectOfInt(begin, length int) []int {
+	vect := make([]int, length)
+	for i := range vect {
+		vect[i] = begin + i
+	}
+	return vect
+}
+
+func vectIntPermutation(seed int64, begin, length int) []int {
+    r := rand.New(rand.NewSource(seed))
+    seed = r.Int63()
+
+	permuted := genVectOfInt(begin, length)
+
+	rand.Shuffle(len(permuted), func(i, j int) {
+		permuted[i], permuted[j] = permuted[j], permuted[i]
+	})
+
+	return permuted
+}
+
+func addSameValToVector(vect []int, val int) []int {
+	for i := range vect {
+		vect[i] += val
+	}
+	return vect
+}
+
+func genPermutationsConcat(seed int64, nPerm, lenPerm int) []int {
+	permutations := make([]int, 0, nPerm*lenPerm)
+
+	for i := 0; i < nPerm; i++ {
+		perm := vectIntPermutation(seed+int64(i), 0, lenPerm)
+		perm = addSameValToVector(perm, i*lenPerm)
+		permutations = append(permutations, perm...)
+	}
+
+	return permutations
+}
+
+func (Enrollment *Enrollment_s) encryptPermutedRefTempSingleCT(refTemp []int64, permutations []int) *rlwe.Ciphertext{
+    ringDim := Enrollment.params.N()
+    permRefTemp := make([]int64, ringDim)
+
+    for i := range refTemp {
+        permRefTemp[i] = refTemp[permutations[i]]
+    }
+    ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
+    Enrollment.encoder.Encode(permRefTemp, ptxt)
+    ctxt := bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
+    Enrollment.encryptor.Encrypt(ptxt, ctxt)
+
+    return ctxt
+}
+
+func getIndexInVect(permutations []int, value int) int {
+	for i, v := range permutations {
+		if v == value {
+			return i
+		}
+	}
+	return -1
+}
+
+func getPermutationsInverse(permutations []int) []int {
+	nLen := len(permutations)
+	permutationsInverse := make([]int, nLen)
+
+	var wg sync.WaitGroup
+	wg.Add(nLen)
+
+	for i := 0; i < nLen; i++ {
+		go func(i int) {
+			defer wg.Done()
+			permutationsInverse[i] = getIndexInVect(permutations, i)
+		}(i)
+	}
+
+	wg.Wait()
+
+	return permutationsInverse
+}
+
+func genPermProbeTemplateFromPermInv(quantizedProb []int64, permutationsInverse []int, lenRow int) []int {
+	dim := len(quantizedProb)
+	permProbeTemp := make([]int, dim)
+
+	var wg sync.WaitGroup
+	wg.Add(dim)
+
+	for i := 0; i < dim; i++ {
+		go func(i int) {
+			defer wg.Done()
+			val := int(quantizedProb[i]) + i*lenRow
+			permProbeTemp[i] = permutationsInverse[val]
+		}(i)
+	}
+
+	wg.Wait()
+	return permProbeTemp
+}
+
+func getPermutedProbeTempMask(permProbeTemp []int, ringDim int) []int64 {
+	nFeat := len(permProbeTemp)
+	permProbeTempMask := make([]int64, ringDim)
+
+	var wg sync.WaitGroup
+	wg.Add(nFeat)
+
+	for i := 0; i < nFeat; i++ {
+		go func(i int) {
+			defer wg.Done()
+			permProbeTempMask[permProbeTemp[i]] = 1
+		}(i)
+	}
+
+	wg.Wait()
+
+	return permProbeTempMask
+}
