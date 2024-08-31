@@ -1,8 +1,20 @@
 package main
 
+/*
+#cgo CFLAGS: -I./funshade/funshade/c
+#cgo LDFLAGS: -L./funshade/build -laes -lfss
+
+#include "aes.h"
+#include "fss.h"
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"fmt"
+	"log"
 	"time"
+	"unsafe"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
@@ -12,6 +24,8 @@ import (
 const SEED  = 54321
 const NFEAT = 128
 const NROWS = 8
+const K     = 1//1024
+const THETA = 1234
 
 func main() {
     //READING THE DATA AND TABLE CONVERSION
@@ -23,19 +37,19 @@ func main() {
 
     mfip, err := readCSVTo2DSlice(mfipPath)
     if err != nil {
-        fmt.Println(fmt.Errorf(err.Error()))
+        log.Fatal(err)
     }
     borders, err := readCSVToFloatSlice(borderPath)
     if err != nil {
-        fmt.Println(fmt.Errorf(err.Error()))
+        log.Fatal(err)
     }
     lfw, err := readCSVToFloatSlice(lfwPath)
     if err != nil {
-        fmt.Println(fmt.Errorf(err.Error()))
+        log.Fatal(err)
     }
     lfwProb, err := readCSVToFloatSlice(lfwProbPath)
     if err != nil {
-        fmt.Println(fmt.Errorf(err.Error()))
+        log.Fatal(err)
     }
 
     //MULTI PARTY MULTI BIP HE
@@ -47,15 +61,14 @@ func main() {
 
     params, err := bfv.NewParametersFromLiteral(paramsDef)
     if err != nil {
-        fmt.Println(fmt.Errorf(err.Error()))
+        log.Fatal(err)
     }
 
-    // optional key
-    crs := []byte("eurecom")
-
-    P0 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
-    P1 := &Party_s{params, bfv.NewEncoder(params),nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
+    P0 := &Party_s{params, bfv.NewEncoder(params), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
+    P1 := &Party_s{params, bfv.NewEncoder(params), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
     PPool := []*Party_s{P0, P1}
+
+    crs := []byte("eurecom")
 
     P0.sk = bfv.NewKeyGenerator(P0.params).GenSecretKey()
     P0.decryptor = bfv.NewDecryptor(P0.params, P0.sk)
@@ -76,168 +89,129 @@ func main() {
     rtk := ColRotKeyGen(PPool)
 	evk := rlwe.EvaluationKey{Rlk: rlk, Rtks: rtk}
 
-    Enrollment := &Enrollment_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil, nil, nil}
-	BIP0 := &BIP_s{params, bfv.NewEvaluator(params, evk), nil}
-	BIP1 := &BIP_s{params, bfv.NewEvaluator(params, evk), nil}
-	Gate := &Gate_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil, nil, nil}
+    Enrollment := &Enrollment_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil}
+	BIP := &BIP_s{params, bfv.NewEvaluator(params, evk), nil, nil}
+	Gate := &Gate_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil}
+
+    P0.evaluator =  bfv.NewEvaluator(params, evk)
+    P1.evaluator =  bfv.NewEvaluator(params, evk)
+
+    Enrollment.Y = mfip
 
     // REFERENCE AND PROBE
     lfwQ := quantizeFeatures(borders, lfw)
-    fmt.Println("LFWQ", lfwQ)
+    Gate.x = lfwQ
 
-    refTemp := refTemplate(lfwQ, mfip)
-    fmt.Println("refTemp", refTemp)
+    refTemp := refTemplate(Gate.x, Enrollment.Y)
+    //fmt.Println("refTemp:", refTemp)
 
     permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
     permutationsInv := getPermutationsInverse(permutations)
-    fmt.Println("permutations", permutations)
-    fmt.Println("permutationsInv", permutationsInv)
 
     quantizedProb := quantizeFeatures(borders , lfwProb)
-    fmt.Println("quantizedProb", quantizedProb)
+    //fmt.Println("quantizedProb", quantizedProb)
 
-    // Do this for the BIP.c_selection
+    // THE FSS RANDOMNESS
+    startFSS := time.Now()
+    P0.r_in, P1.r_in, P0.k, P1.k = FssGenSign(K, THETA)
+    endFSS := time.Now()
+    fmt.Println("FSS timing:", endFSS.Sub(startFSS))
+
+    r_in := make([]int32, K)
+    // Addition of the modulus operation (?)
+    for i := range r_in {
+        r_in[i] = P0.r_in[i] + P1.r_in[i]
+    }
+    fmt.Println(r_in)
+    BIP.r_in = make([]int64, len(r_in))
+    for i, v := range r_in {
+        BIP.r_in[i] = int64(v)
+    }
+    fmt.Println(BIP.r_in)
+
+    //fmt.Println("P0 r_in", P0.r_in)
+    //fmt.Println("P1 r_in", P1.r_in)
+    //fmt.Println("BIP r_in", BIP.r_in)
+
     ctxtSelection := Enrollment.encryptPermutedRefTempSingleCT(refTemp, permutations)
 
-    BIP0.c_selection = ctxtSelection
-    BIP1.c_selection = ctxtSelection
+    ptxtAdd := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
+    Enrollment.encoder.Encode(BIP.r_in, ptxtAdd)
+    BIP.c_selection = BIP.evaluator.AddNew(ctxtSelection, ptxtAdd)
 
     permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProb, permutationsInv, NROWS);
     permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
-    fmt.Println("permProbeTempMask", permProbeTempMask)
-
-    // CHANGE THIS
-    Enrollment.Y_1 = mfip
-    Enrollment.Y_2 = mfip
+    //fmt.Println("permProbeTempMask:", permProbeTempMask)
 
     Gate.col_selection = permProbeTempMask
 
+    // TIMING SCORE
     start := time.Now()
-    FinalScore1 := P0.getFinalScoreCT(PPool, BIP0, Gate.col_selection)
-    //FinalScore2 := P1.getFinalScoreCT(PPool, BIP1, Gate.col_selection)
 
-    // Decrypt Final Score 1
-    //encOut := CKSDecrypt(P0.params, PPool, FinalScore1)
-    //ptres := bfv.NewPlaintext(params, params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut, ptres)
+    result := P0.getFinalScoreCT(BIP, Gate.col_selection)
 
-    //res := P0.encoder.DecodeIntNew(ptres)
-    //fmt.Println("FinalScore1:", res)
-
-    // Decrypt Final Score 2
-    //encOut = CKSDecrypt(P1.params, PPool, FinalScore2)
-    //ptres = bfv.NewPlaintext(params, params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut, ptres)
-
-    //res = P1.encoder.DecodeIntNew(ptres)
-    //fmt.Println("FinalScore2:", res)
-
-    addedResult := FinalScore1 //BIP0.AddCiphertextsSingle(FinalScore1, FinalScore2)
-
-    // Decrypt Added Score
-    encOut := CKSDecrypt(P0.params, PPool, addedResult)
+    // Decrypt Score
+    encOut := CKSDecrypt(P0.params, PPool, result)
     ptres := bfv.NewPlaintext(params, params.MaxLevel())
 	P0.decryptor.Decrypt(encOut, ptres)
 
     res := P0.encoder.DecodeIntNew(ptres)
-    fmt.Println("addedResult:", res[:20])
+    x_hat := make([]int32, len(res))
+    for i, v := range res {
+        x_hat[i] = int32(v)
+    }
+
+    // FSS EVAL
+    o_0, err := FssEvalSign(K, false, P0.k, x_hat[:K])
+    if err != nil {
+        log.Fatal(err)
+    }
+    o_1, err := FssEvalSign(K, true, P1.k, x_hat[:K])
+    if err != nil {
+        log.Fatal(err)
+    }
+    o := make([]int32, len(o_0))
+    for i := range o_0 {
+        o[i] = o_0[i] + o_1[i]
+    }
+
+    fmt.Println("Result:", x_hat)
+
     end := time.Now()
     fmt.Println("time", end.Sub(start))
+}
 
-    //fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
-    //fmt.Println(reflect.DeepEqual(z0, z1))
+func FssGenSign(K int32, theta int32) ([]int32, []int32, []byte, []byte) {
+    r_in0 := make([]int32, K)
+    r_in1 := make([]int32, K)
+    k0 := make([]byte, K*C.KEY_LEN)
+    k1 := make([]byte, K*C.KEY_LEN)
 
-    // TEST
-    //r1, r2 := 1, 1 // Should be FSS randomness
-    //tPrt := testProtocol(tab1selectionsFlat, tab2selectionsFlat, bmapFlat, r1, r2)
-    //fmt.Println("Protocol test:", tPrt)
+    r_in0Ptr := (*C.int32_t)(unsafe.Pointer(&r_in0[0]))
+    r_in1Ptr := (*C.int32_t)(unsafe.Pointer(&r_in1[0]))
+	k0Ptr := (*C.uint8_t)(unsafe.Pointer(&k0[0]))
+	k1Ptr := (*C.uint8_t)(unsafe.Pointer(&k1[0]))
 
-    //// ROW SELECTION AND MASKING
-    //selections := make([]int, 0)
-    //SELTIMES := 3
-    //for i:=0; i<SELTIMES; i++ {
-    //    selections = append(selections, rand.Intn(NROWS))
-    //}
-    //fmt.Printf("selections: %v\n", selections)
+    C.SIGN_gen_batch(C.size_t(K), C.int(theta), r_in0Ptr, r_in1Ptr, k0Ptr, k1Ptr)
 
-    //tab1selections := selectRows(Enrollment.Y_1, selections)
-    //tab2selections := selectRows(Enrollment.Y_2, selections)
+    return r_in0, r_in1, k0, k1
+}
 
-    //fmt.Println("selection1")
-    //printMatrix(tab1selections)
-    //fmt.Println("selection2")
-    //printMatrix(tab2selections)
+func FssEvalSign(K int32, j bool, k_j []byte, x_hat []int32) ([]int32, error) {
+    if len(x_hat) != int(K) {
+		return nil, fmt.Errorf("<FssEvalSign error> x_hat shares must be of length %d", K)
+	}
+	if len(k_j) != int(K*C.KEY_LEN) {
+		return nil, fmt.Errorf("<FssEvalSign error> FSS keys k_j must be of length %d", K*C.KEY_LEN)
+	}
 
-    //tab1selectionsFlat := flatten(tab1selections)
-    //tab2selectionsFlat := flatten(tab2selections)
-    ////tab1selectionsFlat := flatten(tab1.([][]int64))
-    ////tab2selectionsFlat := flatten(tab2.([][]int64))
+	o_j := make([]int32, K)
 
-    //fmt.Println("tab1selectionsFlat")
-    //fmt.Println(tab1selectionsFlat)
-    //fmt.Println("tab2selectionsFlat")
-    //fmt.Println(tab2selectionsFlat)
+	k_jPtr := (*C.uint8_t)(unsafe.Pointer(&k_j[0]))
+	x_hatPtr := (*C.int32_t)(unsafe.Pointer(&x_hat[0]))
+	o_jPtr := (*C.int32_t)(unsafe.Pointer(&o_j[0]))
 
-    //tab1selectionsFlatC := Enrollment.EncryptFlatSingle(tab1selectionsFlat)
-    //encOut := CKSDecrypt(P0.params, PPool, tab1selectionsFlatC)
-	//ptres := bfv.NewPlaintext(P0.params, P0.params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut, ptres)
+	C.SIGN_eval_batch(C.size_t(K), C.bool(j), k_jPtr, x_hatPtr, o_jPtr)
 
-	//res := P0.encoder.DecodeIntNew(ptres)
-    //fmt.Println("tab1selectionsFlat Decr :", res[:50])
-
-    //tab2selectionsFlatC := Enrollment.EncryptFlatSingle(tab2selectionsFlat)
-    //encOut = CKSDecrypt(P1.params, PPool, tab2selectionsFlatC)
-	//ptres = bfv.NewPlaintext(P1.params, P1.params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut, ptres)
-
-	//res = P0.encoder.DecodeIntNew(ptres)
-    //fmt.Println("tab2selectionsFlat Decr :", res[:50])
-
-    //BIP0.c_selection = tab1selectionsFlatC
-    //BIP1.c_selection = tab2selectionsFlatC
-
-    //// Do this in gate and encrypt it
-    //b := genRandInexes(len(selections), NROWS)
-	//fmt.Println("Selected Columns", b)
-    //bmapFlat := genFlatIndexMaps(b, NROWS)
-    //Gate.col_selection = bmapFlat
-    //fmt.Println("Flat mask:", Gate.col_selection)
-
-    //// Testing with the unencrypted values
-    //r1, r2 := 1, 1
-    //tPrt := testProtocol(tab1selectionsFlat, tab2selectionsFlat, bmapFlat, r1, r2)
-    //fmt.Println("Protocol test:", tPrt)
-
-    //FinalScore1 := P0.getFinalScoreCT(PPool, BIP0, Gate.col_selection)
-    //FinalScore2 := P1.getFinalScoreCT(PPool, BIP1, Gate.col_selection)
-
-    //// Decrypt Final Score 1
-    //encOut = CKSDecrypt(P0.params, PPool, FinalScore1)
-    //ptres = bfv.NewPlaintext(params, params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut, ptres)
-
-    //res = P0.encoder.DecodeIntNew(ptres)
-    //fmt.Println("FinalScore1:", res)
-
-    //// Decrypt Final Score 2
-    ////encOut = CKSDecrypt(P1.params, PPool, FinalScore2)
-    ////ptres = bfv.NewPlaintext(params, params.MaxLevel())
-	////P0.decryptor.Decrypt(encOut, ptres)
-
-    ////res = P1.encoder.DecodeIntNew(ptres)
-    ////fmt.Println("FinalScore2:", res)
-
-    //addedResult := BIP0.AddCiphertextsSingle(FinalScore1, FinalScore2)
-
-    //// Decrypt Added Score
-    //encOut = CKSDecrypt(P0.params, PPool, addedResult)
-    //ptres = bfv.NewPlaintext(params, params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut, ptres)
-
-    //res = P0.encoder.DecodeIntNew(ptres)
-    //fmt.Println("addedResult:", res[:20])
-
-    ////fmt.Print("Checking if decrypted plaintexts for P0 and P1 are the same: ")
-    ////fmt.Println(reflect.DeepEqual(z0, z1))
+	return o_j, nil
 }

@@ -21,10 +21,10 @@ func genFlatIndexMaps(indexes []int64, cols int) []int64 {
 }
 
 // Clear row selection to clear probe mask
-func compFlatRowsTimesMasks(A, b []int64) []int64 {
-    result := make([]int64, len(A))
+func compFlatRowsTimesMasks(A, b []int64) []int {
+    result := make([]int, len(A))
     for i := range A {
-        result[i] = A[i] * b[i]
+        result[i] = int(A[i] * b[i])
     }
     return result
 }
@@ -49,14 +49,13 @@ func (BIP *BIP_s) compCCFlatRowsTimesMasks(A, b []*rlwe.Ciphertext) []*rlwe.Ciph
     return result
 }
 
-func testProtocol(live0, live1, ref []int64, r0, r1 int) int {
-    p1 := compFlatRowsTimesMasks(live0, ref)
-    p2 := compFlatRowsTimesMasks(live1, ref)
+func testProtocol(live, ref []int64, r int) int {
+    p := compFlatRowsTimesMasks(live, ref)
 
     sum := 0
-    for i := range p1 {
-        sum += int(p1[i] + p2[i])
+    for i := range p {
+        sum += p[i]
     }
-    return sum + r0 + r1
+    return sum + r
 }
 
