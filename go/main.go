@@ -24,15 +24,15 @@ import (
 const SEED  = 54321
 const NFEAT = 128
 const NROWS = 8
-const K     = 1//1024
-const THETA = 1234
+const K     = 1
+const THETA = 500
 
 func main() {
     //READING THE DATA AND TABLE CONVERSION
     mfipPath := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
     borderPath := "./lookupTables/Borders/Borders_nB_3_dimF_128.csv"
-    lfwPath := "./data/LFW/Paul_McCartney/0.csv"
-    //lfwPath := "./data/LFW/John_Lennon/0.csv"
+    lfwRefPath := "./data/LFW/Paul_McCartney/0.csv"
+    //lfwRefPath := "./data/LFW/John_Lennon/0.csv"
     lfwProbPath := "./data/LFW/Paul_McCartney/1.csv"
 
     mfip, err := readCSVTo2DSlice(mfipPath)
@@ -43,21 +43,24 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    lfw, err := readCSVToFloatSlice(lfwPath)
+    lfwRef, err := readCSVToFloatSlice(lfwRefPath)
     if err != nil {
         log.Fatal(err)
     }
-    lfwProb, err := readCSVToFloatSlice(lfwProbPath)
+    lfwProbe, err := readCSVToFloatSlice(lfwProbPath)
     if err != nil {
         log.Fatal(err)
     }
 
-    //MULTI PARTY MULTI BIP HE
     paramsDef := bfv.PN13QP218
-    // Set the propper T value instead of a default later
-    paramsDef.T = 0x3ee0001
-    // Setting Correct N
     paramsDef.LogN = 11
+
+    l := 128
+	v_max := 1 << 16 // 12 for 32 bits, normally should be 3 for max value
+    N := 1 << paramsDef.LogN
+	paramsDef.T = getOptimalT(uint64(l), uint64(v_max), float64(N))
+
+    //fmt.Println("T", bits.Len64(paramsDef.T))
 
     params, err := bfv.NewParametersFromLiteral(paramsDef)
     if err != nil {
@@ -89,57 +92,57 @@ func main() {
     rtk := ColRotKeyGen(PPool)
 	evk := rlwe.EvaluationKey{Rlk: rlk, Rtks: rtk}
 
-    Enrollment := &Enrollment_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil}
+    Enrollment := &Enrollment_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil, nil, nil, nil}
 	BIP := &BIP_s{params, bfv.NewEvaluator(params, evk), nil, nil}
 	Gate := &Gate_s{params, bfv.NewEncoder(params), bfv.NewEncryptor(params, pk), nil, nil}
 
     P0.evaluator =  bfv.NewEvaluator(params, evk)
     P1.evaluator =  bfv.NewEvaluator(params, evk)
 
-    Enrollment.Y = mfip
+    Enrollment.mfip = mfip
+    Enrollment.x = lfwProbe
+    Enrollment.Y = lfwRef
+    Enrollment.borders = borders
 
-    // REFERENCE AND PROBE
-    lfwQ := quantizeFeatures(borders, lfw)
-    Gate.x = lfwQ
-
-    refTemp := refTemplate(Gate.x, Enrollment.Y)
+    // PROBE AND REFERENCE
+    lfwRefQ := quantizeFeatures(Enrollment.borders, Enrollment.Y)
+    refTemp := refTemplate(lfwRefQ, Enrollment.mfip)
     //fmt.Println("refTemp:", refTemp)
 
     permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
     permutationsInv := getPermutationsInverse(permutations)
 
-    quantizedProb := quantizeFeatures(borders , lfwProb)
-    //fmt.Println("quantizedProb", quantizedProb)
+    quantizedProbe := quantizeFeatures(Enrollment.borders , Enrollment.x)
+    //fmt.Println("quantizedProbe", quantizedProbe)
 
-    // THE FSS RANDOMNESS
+    // FSS RANDOMNESS
     startFSS := time.Now()
     P0.r_in, P1.r_in, P0.k, P1.k = FssGenSign(K, THETA)
     endFSS := time.Now()
     fmt.Println("FSS timing:", endFSS.Sub(startFSS))
 
-    r_in := make([]int32, K)
-    // Addition of the modulus operation (?)
-    for i := range r_in {
-        r_in[i] = P0.r_in[i] + P1.r_in[i]
+    BIP.r_in = make([]int32, K)
+    for i := range P0.r_in {
+        BIP.r_in[i] = P0.r_in[i] + P1.r_in[i]
     }
-    fmt.Println(r_in)
-    BIP.r_in = make([]int64, len(r_in))
-    for i, v := range r_in {
-        BIP.r_in[i] = int64(v)
-    }
-    fmt.Println(BIP.r_in)
+    fmt.Printf("P0 r_in : %v\n", P0.r_in[:1])
+    fmt.Printf("P1 r_in : %v\n", P1.r_in[:1])
+    fmt.Printf("BIP r_in: %v\n", BIP.r_in[:1])
 
-    //fmt.Println("P0 r_in", P0.r_in)
-    //fmt.Println("P1 r_in", P1.r_in)
-    //fmt.Println("BIP r_in", BIP.r_in)
+    // Adding fss randomness to selected columns before ecnryption
+    r_values := divideIntoParts(BIP.r_in[0], NFEAT)
+    fmt.Println("BIP.r_in divided:", r_values)
 
-    ctxtSelection := Enrollment.encryptPermutedRefTempSingleCT(refTemp, permutations)
+    ctxtSelection := Enrollment.encryptPermutedRefTempSingleCT(r_values, refTemp, permutations)
+    BIP.c_selection = ctxtSelection
 
-    ptxtAdd := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
-    Enrollment.encoder.Encode(BIP.r_in, ptxtAdd)
-    BIP.c_selection = BIP.evaluator.AddNew(ctxtSelection, ptxtAdd)
+    encOut1 := CKSDecrypt(P0.params, PPool, ctxtSelection)
+    ptres1 := bfv.NewPlaintext(P0.params, params.MaxLevel())
+	P0.decryptor.Decrypt(encOut1, ptres1)
+    res1 := P0.encoder.DecodeIntNew(ptres1)
+    fmt.Println("ctxtSelection", res1[:32])
 
-    permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProb, permutationsInv, NROWS);
+    permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProbe, permutationsInv, NROWS);
     permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
     //fmt.Println("permProbeTempMask:", permProbeTempMask)
 
@@ -154,8 +157,9 @@ func main() {
     encOut := CKSDecrypt(P0.params, PPool, result)
     ptres := bfv.NewPlaintext(params, params.MaxLevel())
 	P0.decryptor.Decrypt(encOut, ptres)
-
     res := P0.encoder.DecodeIntNew(ptres)
+    fmt.Println("getFinalScoreCT:", res[:32])
+
     x_hat := make([]int32, len(res))
     for i, v := range res {
         x_hat[i] = int32(v)
@@ -175,7 +179,7 @@ func main() {
         o[i] = o_0[i] + o_1[i]
     }
 
-    fmt.Println("Result:", x_hat)
+    fmt.Println("o  :", o)
 
     end := time.Now()
     fmt.Println("time", end.Sub(start))

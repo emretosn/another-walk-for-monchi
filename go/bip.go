@@ -2,8 +2,9 @@ package main
 
 import (
 	"math"
-    "math/rand"
-    "sync"
+	"math/big"
+	"math/rand"
+	"sync"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/dbfv"
@@ -16,29 +17,32 @@ type Enrollment_s struct {
 	params    bfv.Parameters
 	encoder   bfv.Encoder
 	encryptor rlwe.Encryptor
-	Y         [][]int64
-    k         []byte
+	mfip      [][]int64
+	x         []float64
+	Y         []float64
+	borders   []float64
+	k         []byte
 }
 
 type BIP_s struct {
 	params      bfv.Parameters
 	evaluator   bfv.Evaluator
-    c_selection *rlwe.Ciphertext
-    r_in        []int64
+	c_selection *rlwe.Ciphertext
+	r_in        []int32
 }
 
 type Gate_s struct {
-	params          bfv.Parameters
-	encoder         bfv.Encoder
-	encryptor       rlwe.Encryptor
-	x               []int64
-    col_selection   []int64
+	params        bfv.Parameters
+	encoder       bfv.Encoder
+	encryptor     rlwe.Encryptor
+	x             []int64
+	col_selection []int64
 }
 
 type Party_s struct {
 	params      bfv.Parameters
 	encoder     bfv.Encoder
-    evaluator   bfv.Evaluator
+	evaluator   bfv.Evaluator
 	sk          *rlwe.SecretKey
 	pk          *rlwe.PublicKey
 	encryptor   rlwe.Encryptor
@@ -49,12 +53,29 @@ type Party_s struct {
 	rlkEphemSk  *rlwe.SecretKey
 	rkgShareOne *drlwe.RKGShare
 	rkgShareTwo *drlwe.RKGShare
-    rtgShare    *drlwe.RTGShare
-    cksShare    *drlwe.CKSShare
+	rtgShare    *drlwe.RTGShare
+	cksShare    *drlwe.CKSShare
 	c_z         *rlwe.Ciphertext
-    c1sShare    *rlwe.Plaintext
-    r_in        []int32
-    k           []byte
+	c1sShare    *rlwe.Plaintext
+	r_in        []int32
+	k           []byte
+}
+
+func getOptimalT(l uint64, v_max uint64, bfv_N float64) uint64 {
+	// Minimum t for no overflow in scalar prod. result:
+	// 		log2(t) >= 2*log2(v_max) + log2(l)
+	bfv_t := uint64(math.Pow(2, math.Log2(float64(v_max))*2+math.Log2(float64(l))))
+	bfv_T := new(big.Int).SetUint64(bfv_t)
+	// Find closer t that fulfills two conditions:
+	//   1) t+1 is divisible by N (required to have SIMD in BFV)
+	//   2) t is prime (security loves primes)
+	isPrime := false
+	for !isPrime {
+		bfv_t = uint64((math.Ceil(float64(bfv_T.Uint64())/(2*bfv_N))+1)*(2*bfv_N) + 1) // Find the next t s.t. t%2N==1
+		bfv_T.SetUint64(bfv_t)
+		isPrime = bfv_T.ProbablyPrime(0) // Check if it is prime. 100% accurate for t<2^64
+	}
+	return bfv_T.Uint64()
 }
 
 func ColPubKeyGen(PPool []*Party_s) *rlwe.PublicKey {
@@ -125,13 +146,13 @@ func ColRotKeyGen(PPool []*Party_s) (rotKeySet *rlwe.RotationKeySet) {
 }
 
 func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
-    ringDim := Party.params.N()
-    halfRing := float64(ringDim / 2)
+	ringDim := Party.params.N()
+	halfRing := float64(ringDim / 2)
 
-    permProbeTempMaskPT := Party.optimizedPlaintextMul(permProbeTempMask)
-    finalScoreCT := BIP.evaluator.MulNew(BIP.c_selection, permProbeTempMaskPT)
+	permProbeTempMaskPT := Party.optimizedPlaintextMul(permProbeTempMask)
+	finalScoreCT := BIP.evaluator.MulNew(BIP.c_selection, permProbeTempMaskPT)
 
-    for i := 0; i < int(math.Log2(float64(halfRing))); i++ {
+	for i := 0; i < int(math.Log2(float64(halfRing))); i++ {
 		rotation := int(math.Pow(2, float64(i)))
 
 		rotatedCT := BIP.evaluator.RotateColumnsNew(finalScoreCT, rotation)
@@ -141,9 +162,9 @@ func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rl
 }
 
 func (Party *Party_s) optimizedPlaintextMul(arr []int64) *bfv.PlaintextMul {
-    plainMask := bfv.NewPlaintextMul(Party.params, Party.params.MaxLevel())
-    Party.encoder.EncodeMul(arr, plainMask)
-    return plainMask
+	plainMask := bfv.NewPlaintextMul(Party.params, Party.params.MaxLevel())
+	Party.encoder.EncodeMul(arr, plainMask)
+	return plainMask
 }
 
 func CKSDecrypt(params bfv.Parameters, P []*Party_s, result *rlwe.Ciphertext) *rlwe.Ciphertext {
@@ -156,15 +177,15 @@ func CKSDecrypt(params bfv.Parameters, P []*Party_s, result *rlwe.Ciphertext) *r
 	zero := rlwe.NewSecretKey(params.Parameters)
 	cksCombined := cks.AllocateShare(params.MaxLevel())
 
-    for _, pi := range P[1:] {
-        cks.GenShare(pi.sk, zero, result, pi.cksShare)
-    }
+	for _, pi := range P[1:] {
+		cks.GenShare(pi.sk, zero, result, pi.cksShare)
+	}
 
 	encOut := bfv.NewCiphertext(params, 1, params.MaxLevel())
-    for _, pi := range P {
-        cks.AggregateShares(pi.cksShare, cksCombined, cksCombined)
-    }
-    cks.KeySwitch(result, cksCombined, encOut)
+	for _, pi := range P {
+		cks.AggregateShares(pi.cksShare, cksCombined, cksCombined)
+	}
+	cks.KeySwitch(result, cksCombined, encOut)
 
 	return encOut
 }
@@ -189,12 +210,12 @@ func quantizeFeatures(borders []float64, unQuantizedFeatures []float64) []int64 
 }
 
 func refTemplate(sampleQ []int64, mfbrTab [][]int64) []int64 {
-    var refTempPacked []int64
-    for _, i := range sampleQ {
-        refTemp := mfbrTab[i]
-        refTempPacked = append(refTempPacked, refTemp...)
-    }
-    return refTempPacked
+	var refTempPacked []int64
+	for _, i := range sampleQ {
+		refTemp := mfbrTab[i]
+		refTempPacked = append(refTempPacked, refTemp...)
+	}
+	return refTempPacked
 }
 
 func genVectOfInt(begin, length int) []int {
@@ -206,8 +227,8 @@ func genVectOfInt(begin, length int) []int {
 }
 
 func vectIntPermutation(seed int64, begin, length int) []int {
-    r := rand.New(rand.NewSource(seed))
-    seed = r.Int63()
+	r := rand.New(rand.NewSource(seed))
+	seed = r.Int63()
 
 	permuted := genVectOfInt(begin, length)
 
@@ -237,19 +258,48 @@ func genPermutationsConcat(seed int64, nPerm, lenPerm int) []int {
 	return permutations
 }
 
-func (Enrollment *Enrollment_s) encryptPermutedRefTempSingleCT(refTemp []int64, permutations []int) *rlwe.Ciphertext{
-    ringDim := Enrollment.params.N()
-    permRefTemp := make([]int64, ringDim)
+// UNDERFLOW ISSUE
+func divideIntoParts(value int32, d int) []int32 {
+	parts := make([]int32, d)
 
-    for i := range refTemp {
-        permRefTemp[i] = refTemp[permutations[i]]
-    }
-    ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
-    Enrollment.encoder.Encode(permRefTemp, ptxt)
-    ctxt := bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
-    Enrollment.encryptor.Encrypt(ptxt, ctxt)
+	if d == 1 {
+		parts[0] = value
+		return parts
+	}
 
-    return ctxt
+	r := rand.New(rand.NewSource(123))
+	remaining := value
+	for i := 0; i < d-1; i++ {
+		// Generate a random number between 0 and remaining value
+		parts[i] = r.Int31() % (1 << 16)
+		remaining -= parts[i]
+	}
+
+	parts[d-1] = remaining
+
+	rand.Shuffle(d, func(i, j int) { parts[i], parts[j] = parts[j], parts[i] })
+
+	return parts
+}
+
+func (Enrollment *Enrollment_s) encryptPermutedRefTempSingleCT(r_values []int32, refTemp []int64, permutations []int) *rlwe.Ciphertext {
+	ringDim := Enrollment.params.N()
+	permRefTemp := make([]int64, ringDim)
+
+	j := -1
+	for i := range refTemp {
+		if i%8 == 0 {
+			j++
+		}
+		permRefTemp[i] = refTemp[permutations[i]] + int64(r_values[j])
+	}
+
+	ptxt := bfv.NewPlaintext(Enrollment.params, Enrollment.params.MaxLevel())
+	Enrollment.encoder.Encode(permRefTemp, ptxt)
+	ctxt := bfv.NewCiphertext(Enrollment.params, 1, Enrollment.params.MaxLevel())
+	Enrollment.encryptor.Encrypt(ptxt, ctxt)
+
+	return ctxt
 }
 
 func getIndexInVect(permutations []int, value int) int {
