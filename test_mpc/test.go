@@ -20,6 +20,7 @@ import (
 	"time"
     "unsafe"
     "log"
+    "path/filepath"
 )
 
 func flattenMatrix(matrix [][]int64) []int64 {
@@ -251,106 +252,126 @@ const NFEAT = 128
 const NROWS = 8
 
 const K     = 1
-const THETA = 500
+const THETA = 200
 
 func main() {
 	mfipPath := "../go/lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
-	refPath := "../go/data/LFW/Paul_McCartney/0.csv"
+    borderPath := "../go/lookupTables/Borders/Borders_nB_3_dimF_128.csv"
+    mfip, err := readCSVTo2DSlice(mfipPath)
+    if err != nil {
+        fmt.Println(fmt.Errorf(err.Error()))
+    }
+    borders, err := readCSVToFloatSlice(borderPath)
+    if err != nil {
+        fmt.Println(fmt.Errorf(err.Error()))
+    }
+
+    // DO 200 PASSANGERS
+
+    bioData := ReadBioData("../go/data/LFW/")
+
+    //livePath := "../go/data/LFW/John_Lennon/0.csv"
+    //refPath := "../go/data/LFW/Paul_McCartney/0.csv"
 	//livePath := "../go/data/LFW/Paul_McCartney/1.csv"
-    livePath := "../go/data/LFW/John_Lennon/0.csv"
 
-	borderPath := "../go/lookupTables/Borders/Borders_nB_3_dimF_128.csv"
+    var boardingTime time.Duration
+    var counter int
+    for _, paths := range bioData {
+        counter++
+        if counter > 200 {
+            break
+        }
 
-	mfip, err := readCSVTo2DSlice(mfipPath)
-	if err != nil {
-		fmt.Println(fmt.Errorf(err.Error()))
-	}
-	reference, err := readCSVToFloatSlice(refPath)
-	if err != nil {
-		fmt.Println(fmt.Errorf(err.Error()))
-	}
-	live, err := readCSVToFloatSlice(livePath)
-	if err != nil {
-		fmt.Println(fmt.Errorf(err.Error()))
-	}
-	borders, err := readCSVToFloatSlice(borderPath)
-	if err != nil {
-		fmt.Println(fmt.Errorf(err.Error()))
-	}
+        lfwRefPath := paths[0]
+        lfwProbePath := paths[1]
+        reference, err := readCSVToFloatSlice(lfwRefPath)
+        if err != nil {
+            fmt.Println(fmt.Errorf(err.Error()))
+        }
+        live, err := readCSVToFloatSlice(lfwProbePath)
+        if err != nil {
+            fmt.Println(fmt.Errorf(err.Error()))
+        }
 
-	// fmt.Println("MFIP", mfip)
-    r0_in, r1_in, k0, k1 := FssGenSign(K, THETA)
-    r_in := make([]int32, K)
-    for i := range r_in {
-        r_in[i] = r0_in[i] + r1_in[i]
+        // fmt.Println("MFIP", mfip)
+        r0_in, r1_in, k0, k1 := FssGenSign(K, THETA)
+        r_in := make([]int32, K)
+        for i := range r_in {
+            r_in[i] = r0_in[i] + r1_in[i]
+        }
+        r_values := divideIntoParts(r_in[0], NFEAT)
+
+        //fmt.Println(r0_in)
+        //fmt.Println(r1_in)
+
+        //fmt.Println(lfw)
+        referenceQ := quantizeFeatures(borders, reference)
+        // fmt.Println("referenceQ", referenceQ)
+
+        liveQ := quantizeFeatures(borders, live)
+        //fmt.Println("liveQ", liveQ)
+        ////print len of liveQ
+        // take liveQ and multiply each value by
+        // fmt.Println("len(liveQ)", len(liveQ))
+
+        refTemp := refTemplate(referenceQ, mfip)
+        //fmt.Printf("refTemp %v \n len(refTemp) %v \n", refTemp, len(refTemp))
+
+        permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
+
+        permRefTemp := genRefTempFromPerm(refTemp, permutations, r_values)
+        // fmt.Println("permRefTemp", permRefTemp)
+        permutationsInv := getPermutationsInverse(permutations)
+
+        permProbeTemp := genPermProbeTemplateFromPermInv(liveQ, permutationsInv, NROWS)
+        // fmt.Println("permProbeTemp", permProbeTemp)
+
+        //Create additive shares of the refTemp
+        share1, share2 := createAdditiveShares(permRefTemp)
+        // fmt.Println("share1", share1)
+        // fmt.Println("share2", share2)
+
+        //measure the time it takes to perform the lookups
+        boardingStart := time.Now()
+        start := time.Now()
+        maskedSore1 := lookupTable(share1, permProbeTemp)
+        maskedScore2 := lookupTable(share2, permProbeTemp)
+        // fmt.Println("lookupTable1", maskedSore1)
+        // fmt.Println("lookupTable2", maskedScore2)
+        result := maskedSore1 + maskedScore2
+        end := time.Now()
+        fmt.Println("Lookup Time:", end.Sub(start))
+        //fmt.Println("result", result)
+
+        res := make([]int32, 1)
+        res[0] = int32(result)
+
+        // FSS EVAL
+        s := time.Now()
+        o_0, err := FssEvalSign(K, false, k0, res)
+        if err != nil {
+            log.Fatal(err)
+        }
+        o_1, err := FssEvalSign(K, true, k1, res)
+        if err != nil {
+            log.Fatal(err)
+        }
+        o := make([]uint16, len(o_0))
+        for i := range o_0 {
+            o[i] = o_0[i] + o_1[i]
+        }
+        e := time.Now()
+        fmt.Println("FSS Time:", e.Sub(s))
+
+        fmt.Println("o:", o)
+
+        boardingEnd := time.Since(boardingStart)
+        boardingTime += boardingEnd
+
+        //resultClear := lookupTable(permRefTemp, permProbeTemp)
+        //fmt.Println("resultClear", resultClear)
     }
-    r_values := divideIntoParts(r_in[0], NFEAT)
-
-    //fmt.Println(r0_in)
-    //fmt.Println(r1_in)
-
-	//fmt.Println(lfw)
-	referenceQ := quantizeFeatures(borders, reference)
-	// fmt.Println("referenceQ", referenceQ)
-
-	liveQ := quantizeFeatures(borders, live)
-	//fmt.Println("liveQ", liveQ)
-	////print len of liveQ
-	// take liveQ and multiply each value by
-	// fmt.Println("len(liveQ)", len(liveQ))
-
-	refTemp := refTemplate(referenceQ, mfip)
-	//fmt.Printf("refTemp %v \n len(refTemp) %v \n", refTemp, len(refTemp))
-
-	permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
-
-	permRefTemp := genRefTempFromPerm(refTemp, permutations, r_values)
-	// fmt.Println("permRefTemp", permRefTemp)
-	permutationsInv := getPermutationsInverse(permutations)
-
-	permProbeTemp := genPermProbeTemplateFromPermInv(liveQ, permutationsInv, NROWS)
-	// fmt.Println("permProbeTemp", permProbeTemp)
-
-	//Create additive shares of the refTemp
-	share1, share2 := createAdditiveShares(permRefTemp)
-	// fmt.Println("share1", share1)
-	// fmt.Println("share2", share2)
-
-	//measure the time it takes to perform the lookups
-	start := time.Now()
-	maskedSore1 := lookupTable(share1, permProbeTemp)
-	maskedScore2 := lookupTable(share2, permProbeTemp)
-	// fmt.Println("lookupTable1", maskedSore1)
-	// fmt.Println("lookupTable2", maskedScore2)
-	result := maskedSore1 + maskedScore2
-    end := time.Now()
-    fmt.Println("Lookup Time:", end.Sub(start))
-	//fmt.Println("result", result)
-
-    res := make([]int32, 1)
-    res[0] = int32(result)
-
-    // FSS EVAL
-    s := time.Now()
-    o_0, err := FssEvalSign(K, false, k0, res)
-    if err != nil {
-        log.Fatal(err)
-    }
-    o_1, err := FssEvalSign(K, true, k1, res)
-    if err != nil {
-        log.Fatal(err)
-    }
-    o := make([]uint16, len(o_0))
-    for i := range o_0 {
-        o[i] = o_0[i] + o_1[i]
-    }
-    e := time.Now()
-    fmt.Println("FSS Time:", e.Sub(s))
-
-    fmt.Println("o:", o)
-
-	//resultClear := lookupTable(permRefTemp, permProbeTemp)
-	//fmt.Println("resultClear", resultClear)
+    fmt.Println("Total Boarding Time:", boardingTime)
 }
 
 func FssGenSign(K int32, theta uint16) ([]int32, []int32, []byte, []byte) {
@@ -410,5 +431,34 @@ func divideIntoParts(value int32, d int) []int32 {
 	rand.Shuffle(d, func(i, j int) { parts[i], parts[j] = parts[j], parts[i] })
 
 	return parts
+}
+
+// Reads files with at least two photos to a map
+func ReadBioData(path string) map[int][]string {
+    bioData := make(map[int][]string, 0)
+    i := 0
+
+    items, err := os.ReadDir(path)
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, item := range items {
+        if item.IsDir() {
+            subdirPath := filepath.Join(path, item.Name())
+            subitems, err := os.ReadDir(subdirPath)
+            if err != nil {
+                log.Fatal(err)
+            }
+            for _, sitem := range subitems {
+                if sitem.Name() == "1.csv" {
+                    dataRefPath := filepath.Join(subdirPath, "0.csv")
+                    dataProbePath := filepath.Join(subdirPath, sitem.Name())
+                    bioData[i] = []string{dataRefPath, dataProbePath}
+                    i++
+                }
+            }
+        }
+    }
+    return bioData
 }
 
