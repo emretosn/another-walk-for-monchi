@@ -31,8 +31,8 @@ func main() {
     //READING THE DATA AND TABLE CONVERSION
     mfipPath := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
     borderPath := "./lookupTables/Borders/Borders_nB_3_dimF_128.csv"
-    lfwRefPath := "./data/LFW/Paul_McCartney/0.csv"
-    //lfwRefPath := "./data/LFW/John_Lennon/0.csv"
+    //lfwRefPath := "./data/LFW/Paul_McCartney/0.csv"
+    lfwRefPath := "./data/LFW/John_Lennon/0.csv"
     lfwProbPath := "./data/LFW/Paul_McCartney/1.csv"
 
     mfip, err := readCSVTo2DSlice(mfipPath)
@@ -140,7 +140,7 @@ func main() {
     ptres1 := bfv.NewPlaintext(P0.params, params.MaxLevel())
 	P0.decryptor.Decrypt(encOut1, ptres1)
     res1 := P0.encoder.DecodeIntNew(ptres1)
-    fmt.Println("ctxtSelection", res1[:32])
+    fmt.Println("ctxtSelection:", res1[:32])
 
     permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProbe, permutationsInv, NROWS);
     permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
@@ -174,7 +174,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    o := make([]int32, len(o_0))
+    o := make([]uint16, len(o_0))
     for i := range o_0 {
         o[i] = o_0[i] + o_1[i]
     }
@@ -185,23 +185,23 @@ func main() {
     fmt.Println("time", end.Sub(start))
 }
 
-func FssGenSign(K int32, theta int32) ([]int32, []int32, []byte, []byte) {
+func FssGenSign(K int32, theta uint16) ([]int32, []int32, []byte, []byte) {
     r_in0 := make([]int32, K)
     r_in1 := make([]int32, K)
     k0 := make([]byte, K*C.KEY_LEN)
     k1 := make([]byte, K*C.KEY_LEN)
 
-    r_in0Ptr := (*C.int32_t)(unsafe.Pointer(&r_in0[0]))
-    r_in1Ptr := (*C.int32_t)(unsafe.Pointer(&r_in1[0]))
+    r_in0Ptr := (*C.uint16_t)(unsafe.Pointer(&r_in0[0]))
+    r_in1Ptr := (*C.uint16_t)(unsafe.Pointer(&r_in1[0]))
 	k0Ptr := (*C.uint8_t)(unsafe.Pointer(&k0[0]))
 	k1Ptr := (*C.uint8_t)(unsafe.Pointer(&k1[0]))
 
-    C.SIGN_gen_batch(C.size_t(K), C.int(theta), r_in0Ptr, r_in1Ptr, k0Ptr, k1Ptr)
+    C.SIGN_gen_batch(C.size_t(K), C.uint16_t(theta), r_in0Ptr, r_in1Ptr, k0Ptr, k1Ptr)
 
     return r_in0, r_in1, k0, k1
 }
 
-func FssEvalSign(K int32, j bool, k_j []byte, x_hat []int32) ([]int32, error) {
+func FssEvalSign(K int32, j bool, k_j []byte, x_hat []int32) ([]uint16, error) {
     if len(x_hat) != int(K) {
 		return nil, fmt.Errorf("<FssEvalSign error> x_hat shares must be of length %d", K)
 	}
@@ -209,11 +209,11 @@ func FssEvalSign(K int32, j bool, k_j []byte, x_hat []int32) ([]int32, error) {
 		return nil, fmt.Errorf("<FssEvalSign error> FSS keys k_j must be of length %d", K*C.KEY_LEN)
 	}
 
-	o_j := make([]int32, K)
+	o_j := make([]uint16, K)
 
 	k_jPtr := (*C.uint8_t)(unsafe.Pointer(&k_j[0]))
-	x_hatPtr := (*C.int32_t)(unsafe.Pointer(&x_hat[0]))
-	o_jPtr := (*C.int32_t)(unsafe.Pointer(&o_j[0]))
+	x_hatPtr := (*C.uint16_t)(unsafe.Pointer(&x_hat[0]))
+	o_jPtr := (*C.uint16_t)(unsafe.Pointer(&o_j[0]))
 
 	C.SIGN_eval_batch(C.size_t(K), C.bool(j), k_jPtr, x_hatPtr, o_jPtr)
 

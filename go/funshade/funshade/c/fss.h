@@ -27,7 +27,7 @@
 //----------------------------------------------------------------------------//
 #define SEC_PARAM       128                 // Security parameter in bits
 #ifndef R_t
-#define R_t             int32_t             // Ring data type for all the constructions
+#define R_t             uint16_t             // Ring data type for all the constructions
 #endif
 #define BETA            1                   // Value of the output of the FSS gate
 
@@ -63,7 +63,7 @@
 #define T_CW_R_PTR(j)   (T_CW_L_PTR(j) + 1)                 // Position of bit t_cw_r
 #define LAST_CW_PTR     (CW_LEN*N_BITS)                     // Position of last correction word, V_cw_n+1
 
-// Positions of left and right elements in the output of G 
+// Positions of left and right elements in the output of G
 #define S_L_PTR         0                                   // Position of state s_l in G output
 #define S_R_PTR         (S_L_PTR + S_LEN)                   // Position of state s_r in G output
 #define V_L_PTR         (S_R_PTR + S_LEN)                   // Position of value v_l in G output
@@ -94,7 +94,7 @@ void init_libsodium();
 //  is defined, otherwise uses rand() (not cryptographically secure but portable).
 R_t random_dtype();                                    // Non-deterministic seed
 R_t random_dtype_seeded(const uint8_t seed[SEED_LEN]);
-void random_buffer(uint8_t buffer[], size_t buffer_len);   // Non-deterministic seed 
+void random_buffer(uint8_t buffer[], size_t buffer_len);   // Non-deterministic seed
 void random_buffer_seeded(uint8_t buffer[], size_t buffer_len, const uint8_t seed[SEED_LEN]);
 
 //................................ DCF GATE ..................................//
@@ -157,7 +157,7 @@ void SIGN_eval_batch(size_t K, bool b, const uint8_t kb[], const R_t x_hat[], R_
 /// @param[out] d_y1[l]     delta share #1 of y
 /// @param[out] d_xy0[l]    delta share #0 of <d_x*d_y>
 /// @param[out] d_xy1[l]    delta share #1 of <d_x*d_y>
-/// @param[out] k0[KEY_LEN] key #0 for fss sign gate 
+/// @param[out] k0[KEY_LEN] key #0 for fss sign gate
 /// @param[out] k1[KEY_LEN] key #1 for fss sign gate
 void funshade_setup(size_t l, R_t theta, R_t r_in[2],
     R_t d_x0[], R_t d_x1[], R_t d_y0[], R_t d_y1[], R_t d_xy0[], R_t d_xy1[], uint8_t k0[KEY_LEN], uint8_t k1[KEY_LEN]);
@@ -186,7 +186,7 @@ R_t funshade_eval_dist(size_t l, bool j, R_t r_in_j,
 /// @param j            party number (0 or 1)
 /// @param kb[KEY_LEN]  key of the party
 /// @param z_hat        Share #j of <f_dist(x,y)>
-/// @return             Share #j of <f_dist(x,y)>=theta>    
+/// @return             Share #j of <f_dist(x,y)>=theta>
 R_t funshade_eval_sign(bool j, const uint8_t kb[KEY_LEN], R_t z_hat);
 
 

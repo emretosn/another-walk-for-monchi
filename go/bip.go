@@ -267,7 +267,8 @@ func divideIntoParts(value int32, d int) []int32 {
 		return parts
 	}
 
-	r := rand.New(rand.NewSource(123))
+    // FIND A WAY TO INCORPORATE THE REMAINING
+	r := rand.New(rand.NewSource(42))
 	remaining := value
 	for i := 0; i < d-1; i++ {
 		// Generate a random number between 0 and remaining value
