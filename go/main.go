@@ -17,6 +17,7 @@ import (
 	"time"
 	"unsafe"
     "path/filepath"
+    "encoding/csv"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
@@ -28,6 +29,8 @@ const NFEAT = 128
 const NROWS = 8
 const K     = 1
 const THETA = 200
+
+const DBSIZE = 1000000
 
 func main() {
     // SETTING FHE PARAMETERS
@@ -92,19 +95,43 @@ func main() {
     Enrollment.mfip = mfip
     Enrollment.borders = borders
 
-    // TAKE 200 PASSANGERS
+    // GETTING THE BIOMETRIC DATA
     bioData := ReadBioData("./data/LFW/")
     //fmt.Println(bioData)
 
-    var boardingTime time.Duration
-    var counter int
-    for _, paths := range bioData {
-        counter++
-        if counter > 200 {
-            break
+    // To save test results
+    err = os.MkdirAll("results", os.ModePerm)
+    if err != nil {
+        log.Fatalf("Failed to create directory: %s", err)
+    }
+    filename := fmt.Sprintf("%d_results.csv", DBSIZE)
+    filePath := filepath.Join("./results", filename)
+    if _, err := os.Stat(filePath); err == nil {
+        err = os.Remove(filePath)
+        if err != nil {
+            log.Fatalf("Failed to delete existing file: %s", err)
         }
-        lfwRefPath := paths[0]
-        lfwProbePath := paths[1]
+    }
+    file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        log.Fatalf("Failed to open file: %s", err)
+    }
+    defer file.Close()
+    writer := csv.NewWriter(file)
+    defer writer.Flush()
+
+    addRecord(writer, []string{"LookupTime", "FSSTime", "MultiplicationTime", "RotationTime", "AdditionTime", "o"})
+
+    var boardingTime time.Duration
+    counter := 0
+
+    for i:=0; i<DBSIZE; i++ {
+        fmt.Println(i, counter)
+        counter = i % len(bioData)
+
+        lfwRefPath := bioData[counter][0]
+        lfwProbePath := bioData[counter][1]
+
         lfwRef, err := readCSVToFloatSlice(lfwRefPath)
         if err != nil {
             log.Fatal(err)
@@ -152,7 +179,7 @@ func main() {
         // TIMING SCORE
         boardingStart := time.Now()
         lookupTime := time.Now()
-        result := P0.getFinalScoreCT(BIP, Gate.col_selection)
+        result, mulTime, rotTime, addTime := P0.getFinalScoreCT(BIP, Gate.col_selection)
 
         // Decrypt Score
         encOut := CKSDecrypt(P0.params, PPool, result)
@@ -190,9 +217,13 @@ func main() {
         fmt.Println("o:", o)
         boardingEnd := time.Since(boardingStart)
         boardingTime += boardingEnd
+
+        oS := fmt.Sprintf("%d", o)
+        addRecord(writer, []string{lookupEnclosed.String(), fssEnclosed.String(), mulTime.String(), rotTime.String(), addTime.String(), oS})
+
     }
     fmt.Println("Total Boarding Time:", boardingTime)
-
+    addRecord(writer, []string{boardingTime.String()})
 }
 
 func FssGenSign(K int32, theta uint16) ([]int32, []int32, []byte, []byte) {
@@ -258,3 +289,12 @@ func ReadBioData(path string) map[int][]string {
     }
     return bioData
 }
+
+func addRecord(writer *csv.Writer, record []string) {
+    err := writer.Write(record)
+    if err != nil {
+        log.Fatalf("Failed to write record to CSV: %s", err)
+    }
+    writer.Flush() // Ensure that the record is written to the file
+}
+

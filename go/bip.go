@@ -147,7 +147,7 @@ func ColRotKeyGen(PPool []*Party_s) (rotKeySet *rlwe.RotationKeySet) {
 	return
 }
 
-func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
+func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) (*rlwe.Ciphertext, time.Duration, time.Duration, time.Duration) {
 	ringDim := Party.params.N()
 	halfRing := float64(ringDim / 2)
     var totalTimeRot, totalTimeAdd time.Duration
@@ -176,7 +176,7 @@ func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rl
     fmt.Println("Addition time      :", totalTimeAdd)
     fmt.Println("Total              :", mulTime + totalTimeRot + totalTimeAdd, "\n")
 
-	return finalScoreCT
+	return finalScoreCT, mulTime, totalTimeRot, totalTimeAdd
 }
 
 func (Party *Party_s) optimizedPlaintextMul(arr []int64) *bfv.PlaintextMul {

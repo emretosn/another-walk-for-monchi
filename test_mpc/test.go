@@ -254,6 +254,8 @@ const NROWS = 8
 const K     = 1
 const THETA = 200
 
+const DBSIZE = 1000000
+
 func main() {
 	mfipPath := "../go/lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
     borderPath := "../go/lookupTables/Borders/Borders_nB_3_dimF_128.csv"
@@ -266,24 +268,41 @@ func main() {
         fmt.Println(fmt.Errorf(err.Error()))
     }
 
-    // DO 200 PASSANGERS
-
+    // GETTING THE BIOMETRIC DATA
     bioData := ReadBioData("../go/data/LFW/")
 
-    //livePath := "../go/data/LFW/John_Lennon/0.csv"
-    //refPath := "../go/data/LFW/Paul_McCartney/0.csv"
-	//livePath := "../go/data/LFW/Paul_McCartney/1.csv"
+    // To save test results
+    err = os.MkdirAll("results", os.ModePerm)
+    if err != nil {
+        log.Fatalf("Failed to create directory: %s", err)
+    }
+    filename := fmt.Sprintf("%d_results.csv", DBSIZE)
+    filePath := filepath.Join("./results", filename)
+    if _, err := os.Stat(filePath); err == nil {
+        err = os.Remove(filePath)
+        if err != nil {
+            log.Fatalf("Failed to delete existing file: %s", err)
+        }
+    }
+    file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        log.Fatalf("Failed to open file: %s", err)
+    }
+    defer file.Close()
+    writer := csv.NewWriter(file)
+    defer writer.Flush()
+
+    addRecord(writer, []string{"LookupTime", "FSSTime", "o"})
 
     var boardingTime time.Duration
-    var counter int
-    for _, paths := range bioData {
-        counter++
-        if counter > 200 {
-            break
-        }
+    counter := 0
+    for i:=0; i<DBSIZE; i++ {
+        fmt.Println(i, counter)
+        counter = i % len(bioData)
 
-        lfwRefPath := paths[0]
-        lfwProbePath := paths[1]
+        lfwRefPath := bioData[counter][0]
+        lfwProbePath := bioData[counter][1]
+
         reference, err := readCSVToFloatSlice(lfwRefPath)
         if err != nil {
             fmt.Println(fmt.Errorf(err.Error()))
@@ -340,7 +359,8 @@ func main() {
         // fmt.Println("lookupTable2", maskedScore2)
         result := maskedSore1 + maskedScore2
         end := time.Now()
-        fmt.Println("Lookup Time:", end.Sub(start))
+        lookupT := end.Sub(start)
+        fmt.Println("Lookup Time:", lookupT)
         //fmt.Println("result", result)
 
         res := make([]int32, 1)
@@ -361,17 +381,22 @@ func main() {
             o[i] = o_0[i] + o_1[i]
         }
         e := time.Now()
-        fmt.Println("FSS Time:", e.Sub(s))
+        fssT := e.Sub(s)
+        fmt.Println("FSS Time:", fssT)
 
         fmt.Println("o:", o)
 
         boardingEnd := time.Since(boardingStart)
         boardingTime += boardingEnd
 
+        oS := fmt.Sprintf("%d", o)
+        addRecord(writer, []string{lookupT.String(), fssT.String(), oS})
+
         //resultClear := lookupTable(permRefTemp, permProbeTemp)
         //fmt.Println("resultClear", resultClear)
     }
     fmt.Println("Total Boarding Time:", boardingTime)
+    addRecord(writer, []string{boardingTime.String()})
 }
 
 func FssGenSign(K int32, theta uint16) ([]int32, []int32, []byte, []byte) {
@@ -460,5 +485,13 @@ func ReadBioData(path string) map[int][]string {
         }
     }
     return bioData
+}
+
+func addRecord(writer *csv.Writer, record []string) {
+    err := writer.Write(record)
+    if err != nil {
+        log.Fatalf("Failed to write record to CSV: %s", err)
+    }
+    writer.Flush() // Ensure that the record is written to the file
 }
 
