@@ -174,7 +174,7 @@ func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rl
     fmt.Println("Multiplication time:", mulTime)
     fmt.Println("Rotation time      :", totalTimeRot)
     fmt.Println("Addition time      :", totalTimeAdd)
-    fmt.Println("Total time         :", mulTime + totalTimeRot + totalTimeAdd, "\n")
+    fmt.Println("Total              :", mulTime + totalTimeRot + totalTimeAdd, "\n")
 
 	return finalScoreCT
 }

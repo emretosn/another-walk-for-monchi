@@ -13,8 +13,10 @@ import "C"
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 	"unsafe"
+    "path/filepath"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
@@ -25,33 +27,10 @@ const SEED  = 54321
 const NFEAT = 128
 const NROWS = 8
 const K     = 1
-const THETA = 500
+const THETA = 200
 
 func main() {
-    //READING THE DATA AND TABLE CONVERSION
-    mfipPath := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
-    borderPath := "./lookupTables/Borders/Borders_nB_3_dimF_128.csv"
-    lfwRefPath := "./data/LFW/John_Lennon/0.csv"
-    //lfwRefPath := "./data/LFW/Paul_McCartney/0.csv"
-    lfwProbPath := "./data/LFW/Paul_McCartney/1.csv"
-
-    mfip, err := readCSVTo2DSlice(mfipPath)
-    if err != nil {
-        log.Fatal(err)
-    }
-    borders, err := readCSVToFloatSlice(borderPath)
-    if err != nil {
-        log.Fatal(err)
-    }
-    lfwRef, err := readCSVToFloatSlice(lfwRefPath)
-    if err != nil {
-        log.Fatal(err)
-    }
-    lfwProbe, err := readCSVToFloatSlice(lfwProbPath)
-    if err != nil {
-        log.Fatal(err)
-    }
-
+    // SETTING FHE PARAMETERS
     paramsDef := bfv.PN13QP218
     paramsDef.LogN = 11
 
@@ -99,90 +78,120 @@ func main() {
     P0.evaluator =  bfv.NewEvaluator(params, evk)
     P1.evaluator =  bfv.NewEvaluator(params, evk)
 
+    //READING THE DATA AND TABLE CONVERSION
+    mfipPath := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
+    borderPath := "./lookupTables/Borders/Borders_nB_3_dimF_128.csv"
+    mfip, err := readCSVTo2DSlice(mfipPath)
+    if err != nil {
+        log.Fatal(err)
+    }
+    borders, err := readCSVToFloatSlice(borderPath)
+    if err != nil {
+        log.Fatal(err)
+    }
     Enrollment.mfip = mfip
-    Enrollment.x = lfwProbe
-    Enrollment.Y = lfwRef
     Enrollment.borders = borders
 
-    // PROBE AND REFERENCE
-    lfwRefQ := quantizeFeatures(Enrollment.borders, Enrollment.Y)
-    refTemp := refTemplate(lfwRefQ, Enrollment.mfip)
-    //fmt.Println("refTemp:", refTemp)
+    // TAKE 200 PASSANGERS
+    bioData := ReadBioData("./data/LFW/")
+    //fmt.Println(bioData)
 
-    permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
-    permutationsInv := getPermutationsInverse(permutations)
+    var boardingTime time.Duration
+    var counter int
+    for _, paths := range bioData {
+        counter++
+        if counter > 200 {
+            break
+        }
+        lfwRefPath := paths[0]
+        lfwProbePath := paths[1]
+        lfwRef, err := readCSVToFloatSlice(lfwRefPath)
+        if err != nil {
+            log.Fatal(err)
+        }
+        lfwProbe, err := readCSVToFloatSlice(lfwProbePath)
+        if err != nil {
+            log.Fatal(err)
+        }
 
-    quantizedProbe := quantizeFeatures(Enrollment.borders , Enrollment.x)
-    //fmt.Println("quantizedProbe", quantizedProbe)
+        Enrollment.x = lfwProbe
+        Enrollment.Y = lfwRef
 
-    // FSS RANDOMNESS
-    P0.r_in, P1.r_in, P0.k, P1.k = FssGenSign(K, THETA)
+        // PROBE AND REFERENCE
+        lfwRefQ := quantizeFeatures(Enrollment.borders, Enrollment.Y)
+        refTemp := refTemplate(lfwRefQ, Enrollment.mfip)
+        //fmt.Println("refTemp:", refTemp)
 
-    BIP.r_in = make([]int32, K)
-    for i := range P0.r_in {
-        BIP.r_in[i] = P0.r_in[i] + P1.r_in[i]
+        permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
+        permutationsInv := getPermutationsInverse(permutations)
+
+        quantizedProbe := quantizeFeatures(Enrollment.borders , Enrollment.x)
+        //fmt.Println("quantizedProbe", quantizedProbe)
+
+        // FSS RANDOMNESS
+        P0.r_in, P1.r_in, P0.k, P1.k = FssGenSign(K, THETA)
+
+        BIP.r_in = make([]int32, K)
+        for i := range P0.r_in {
+            BIP.r_in[i] = P0.r_in[i] + P1.r_in[i]
+        }
+
+        // Adding fss randomness to selected columns before ecnryption
+        r_values := divideIntoParts(BIP.r_in[0], NFEAT)
+        //fmt.Println("BIP.r_in divided:", r_values)
+
+        ctxtSelection := Enrollment.encryptPermutedRefTempSingleCT(r_values, refTemp, permutations)
+        BIP.c_selection = ctxtSelection
+
+        permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProbe, permutationsInv, NROWS);
+        permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
+        //fmt.Println("permProbeTempMask:", permProbeTempMask)
+
+        Gate.col_selection = permProbeTempMask
+
+        // TIMING SCORE
+        boardingStart := time.Now()
+        lookupTime := time.Now()
+        result := P0.getFinalScoreCT(BIP, Gate.col_selection)
+
+        // Decrypt Score
+        encOut := CKSDecrypt(P0.params, PPool, result)
+        ptres := bfv.NewPlaintext(params, params.MaxLevel())
+        P0.decryptor.Decrypt(encOut, ptres)
+        res := P0.encoder.DecodeIntNew(ptres)
+        //fmt.Println("getFinalScoreCT:", res[:32])
+
+        lookupEnclosed := time.Since(lookupTime)
+        fmt.Println("Lookup Time:", lookupEnclosed)
+
+        x_hat := make([]int32, 1)
+        x_hat[0] = int32(res[0])
+        //fmt.Println("x_hat:", x_hat)
+
+        // FSS EVAL
+        fssTime := time.Now()
+
+        o_0, err := FssEvalSign(K, false, P0.k, x_hat)
+        if err != nil {
+            log.Fatal(err)
+        }
+        o_1, err := FssEvalSign(K, true, P1.k, x_hat)
+        if err != nil {
+            log.Fatal(err)
+        }
+        o := make([]uint16, len(o_0))
+        for i := range o_0 {
+            o[i] = o_0[i] + o_1[i]
+        }
+
+        fssEnclosed := time.Since(fssTime)
+        fmt.Println("FSS Time:", fssEnclosed)
+
+        fmt.Println("o:", o)
+        boardingEnd := time.Since(boardingStart)
+        boardingTime += boardingEnd
     }
-    //fmt.Printf("P0 r_in : %v\n", P0.r_in[:1])
-    //fmt.Printf("P1 r_in : %v\n", P1.r_in[:1])
-    //fmt.Printf("BIP r_in: %v\n", BIP.r_in[:1])
-
-    // Adding fss randomness to selected columns before ecnryption
-    r_values := divideIntoParts(BIP.r_in[0], NFEAT)
-    //fmt.Println("BIP.r_in divided:", r_values)
-
-    ctxtSelection := Enrollment.encryptPermutedRefTempSingleCT(r_values, refTemp, permutations)
-    BIP.c_selection = ctxtSelection
-
-    //encOut1 := CKSDecrypt(P0.params, PPool, ctxtSelection)
-    //ptres1 := bfv.NewPlaintext(P0.params, params.MaxLevel())
-	//P0.decryptor.Decrypt(encOut1, ptres1)
-    //res1 := P0.encoder.DecodeIntNew(ptres1)
-    //fmt.Println("ctxtSelection:", res1[:32])
-
-    permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProbe, permutationsInv, NROWS);
-    permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
-    //fmt.Println("permProbeTempMask:", permProbeTempMask)
-
-    Gate.col_selection = permProbeTempMask
-
-    // TIMING SCORE
-    lookupTime := time.Now()
-    result := P0.getFinalScoreCT(BIP, Gate.col_selection)
-
-    // Decrypt Score
-    encOut := CKSDecrypt(P0.params, PPool, result)
-    ptres := bfv.NewPlaintext(params, params.MaxLevel())
-	P0.decryptor.Decrypt(encOut, ptres)
-    res := P0.encoder.DecodeIntNew(ptres)
-    //fmt.Println("getFinalScoreCT:", res[:32])
-
-    lookupEnclosed := time.Since(lookupTime)
-    fmt.Println("Lookup Time:", lookupEnclosed)
-
-    x_hat := make([]int32, 1)
-    x_hat[0] = int32(res[0])
-    //fmt.Println("x_hat:", x_hat)
-
-    // FSS EVAL
-    fssTime := time.Now()
-
-    o_0, err := FssEvalSign(K, false, P0.k, x_hat)
-    if err != nil {
-        log.Fatal(err)
-    }
-    o_1, err := FssEvalSign(K, true, P1.k, x_hat)
-    if err != nil {
-        log.Fatal(err)
-    }
-    o := make([]uint16, len(o_0))
-    for i := range o_0 {
-        o[i] = o_0[i] + o_1[i]
-    }
-
-    fssEnclosed := time.Since(fssTime)
-    fmt.Println("FSS Time:", fssEnclosed)
-
-    fmt.Println("o:", o)
+    fmt.Println("Total Boarding Time:", boardingTime)
 
 }
 
@@ -219,4 +228,33 @@ func FssEvalSign(K int32, j bool, k_j []byte, x_hat []int32) ([]uint16, error) {
 	C.SIGN_eval_batch(C.size_t(K), C.bool(j), k_jPtr, x_hatPtr, o_jPtr)
 
 	return o_j, nil
+}
+
+// Reads files with at least two photos to a map
+func ReadBioData(path string) map[int][]string {
+    bioData := make(map[int][]string, 0)
+    i := 0
+
+    items, err := os.ReadDir(path)
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, item := range items {
+        if item.IsDir() {
+            subdirPath := filepath.Join(path, item.Name())
+            subitems, err := os.ReadDir(subdirPath)
+            if err != nil {
+                log.Fatal(err)
+            }
+            for _, sitem := range subitems {
+                if sitem.Name() == "1.csv" {
+                    dataRefPath := filepath.Join(subdirPath, "0.csv")
+                    dataProbePath := filepath.Join(subdirPath, sitem.Name())
+                    bioData[i] = []string{dataRefPath, dataProbePath}
+                    i++
+                }
+            }
+        }
+    }
+    return bioData
 }
