@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/dbfv"
@@ -148,16 +150,32 @@ func ColRotKeyGen(PPool []*Party_s) (rotKeySet *rlwe.RotationKeySet) {
 func (Party *Party_s) getFinalScoreCT(BIP *BIP_s, permProbeTempMask []int64) *rlwe.Ciphertext {
 	ringDim := Party.params.N()
 	halfRing := float64(ringDim / 2)
+    var totalTimeRot, totalTimeAdd time.Duration
 
+    mulStart:= time.Now()
 	permProbeTempMaskPT := Party.optimizedPlaintextMul(permProbeTempMask)
 	finalScoreCT := BIP.evaluator.MulNew(BIP.c_selection, permProbeTempMaskPT)
+    mulTime := time.Since(mulStart)
 
 	for i := 0; i < int(math.Log2(float64(halfRing))); i++ {
 		rotation := int(math.Pow(2, float64(i)))
 
+        rotStart := time.Now()
 		rotatedCT := BIP.evaluator.RotateColumnsNew(finalScoreCT, rotation)
+        rotEnclosed := time.Since(rotStart)
+        totalTimeRot += rotEnclosed
+
+        addStart := time.Now()
 		BIP.evaluator.Add(finalScoreCT, rotatedCT, finalScoreCT)
+        addEnclosed := time.Since(addStart)
+        totalTimeAdd += addEnclosed
 	}
+
+    fmt.Println("Multiplication time:", mulTime)
+    fmt.Println("Rotation time      :", totalTimeRot)
+    fmt.Println("Addition time      :", totalTimeAdd)
+    fmt.Println("Total time         :", mulTime + totalTimeRot + totalTimeAdd, "\n")
+
 	return finalScoreCT
 }
 
@@ -258,7 +276,6 @@ func genPermutationsConcat(seed int64, nPerm, lenPerm int) []int {
 	return permutations
 }
 
-// UNDERFLOW ISSUE
 func divideIntoParts(value int32, d int) []int32 {
 	parts := make([]int32, d)
 

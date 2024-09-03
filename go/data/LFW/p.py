@@ -1,37 +1,27 @@
+import os
 import numpy as np
 import csv
-import os
 
+# Define the main folder path
+main_folder_path = '.'
 
-directory = './John_Lennon'
+for root, dirs, files in os.walk(main_folder_path):
+    for file in files:
+        if file.endswith('.npy'):
+            # Load the .npy file
+            npy_file_path = os.path.join(root, file)
+            data = np.load(npy_file_path)
 
+            # Ensure the data is flattened (1D array)
+            flat_data = data.flatten()
 
-for filename in os.listdir(directory):
+            # Save to CSV file
+            csv_file_path = os.path.join(root, file.replace('.npy', '.csv'))
+            with open(csv_file_path, 'w', newline='') as csv_file:
+                writer = csv.writer(csv_file)
 
-    if filename.endswith('.npy'):
-        npy_file_path = os.path.join(directory, filename)
+                # Write each element as separate entries in the same row
+                writer.writerow(flat_data)
 
-
-        data = np.load(npy_file_path)
-
-
-        csv_file_path = os.path.join(directory, filename.replace('.npy', '.csv'))
-
-
-        with open(csv_file_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-
-
-            if data.ndim == 1:
-                for item in data:
-                    writer.writerow([item])
-
-
-            else:
-                for row in data:
-                    writer.writerow(row)
-
-        print(f"Converted {filename} to {csv_file_path}")
-
-print("All .npy files have been successfully converted to .csv files.")
+            print(f'Saved {csv_file_path}')
 

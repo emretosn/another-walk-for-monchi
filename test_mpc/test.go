@@ -1,5 +1,15 @@
 package main
 
+/*
+#cgo CFLAGS: -I./funshade/funshade/c
+#cgo LDFLAGS: -L./funshade/build -laes -lfss
+
+#include "aes.h"
+#include "fss.h"
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"encoding/csv"
 	"fmt"
@@ -8,8 +18,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	//"math/bits"
-	//"math/rand"
+    "unsafe"
+    "log"
 )
 
 func flattenMatrix(matrix [][]int64) []int64 {
@@ -174,11 +184,16 @@ func getPermutationsInverse(permutations []int) []int {
 
 	return permutationsInverse
 }
-func genRefTempFromPerm(refTemp []int64, permutations []int) []int64 {
+func genRefTempFromPerm(refTemp []int64, permutations []int, r_values []int32) []int64 {
 	dim := len(refTemp)
 	permRefTemp := make([]int64, dim)
+
+    j := -1
 	for i := 0; i < dim; i++ {
-		permRefTemp[i] = refTemp[permutations[i]]
+        if i%8 == 0 {
+            j++
+        }
+		permRefTemp[i] = refTemp[permutations[i]] + int64(r_values[j])
 	}
 	return permRefTemp
 }
@@ -207,7 +222,11 @@ func createAdditiveShares(vector []int64) ([]int64, []int64) {
 	n := len(vector)
 	share1 := make([]int64, n)
 	share2 := make([]int64, n)
+    j := -1
 	for i := 0; i < n; i++ {
+		if i%8 == 0 {
+			j++
+		}
 		// generate a random number in the range of int32 and cast it to int64
 		share1[i] = int64(rand.Int31())
 		share2[i] = vector[i] - share1[i]
@@ -231,10 +250,15 @@ const SEED = 54321
 const NFEAT = 128
 const NROWS = 8
 
+const K     = 1
+const THETA = 500
+
 func main() {
 	mfipPath := "../go/lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
 	refPath := "../go/data/LFW/Paul_McCartney/0.csv"
-	livePath := "../go/data/LFW/Paul_McCartney/1.csv"
+	//livePath := "../go/data/LFW/Paul_McCartney/1.csv"
+    livePath := "../go/data/LFW/John_Lennon/0.csv"
+
 	borderPath := "../go/lookupTables/Borders/Borders_nB_3_dimF_128.csv"
 
 	mfip, err := readCSVTo2DSlice(mfipPath)
@@ -255,23 +279,32 @@ func main() {
 	}
 
 	// fmt.Println("MFIP", mfip)
+    r0_in, r1_in, k0, k1 := FssGenSign(K, THETA)
+    r_in := make([]int32, K)
+    for i := range r_in {
+        r_in[i] = r0_in[i] + r1_in[i]
+    }
+    r_values := divideIntoParts(r_in[0], NFEAT)
+
+    //fmt.Println(r0_in)
+    //fmt.Println(r1_in)
 
 	//fmt.Println(lfw)
 	referenceQ := quantizeFeatures(borders, reference)
 	// fmt.Println("referenceQ", referenceQ)
 
 	liveQ := quantizeFeatures(borders, live)
-	fmt.Println("liveQ", liveQ)
-	//print len of liveQ
+	//fmt.Println("liveQ", liveQ)
+	////print len of liveQ
 	// take liveQ and multiply each value by
 	// fmt.Println("len(liveQ)", len(liveQ))
 
 	refTemp := refTemplate(referenceQ, mfip)
-	fmt.Printf("refTemp %v \n len(refTemp) %v \n", refTemp, len(refTemp))
+	//fmt.Printf("refTemp %v \n len(refTemp) %v \n", refTemp, len(refTemp))
 
 	permutations := genPermutationsConcat(SEED, NFEAT, NROWS)
 
-	permRefTemp := genRefTempFromPerm(refTemp, permutations)
+	permRefTemp := genRefTempFromPerm(refTemp, permutations, r_values)
 	// fmt.Println("permRefTemp", permRefTemp)
 	permutationsInv := getPermutationsInverse(permutations)
 
@@ -290,10 +323,92 @@ func main() {
 	// fmt.Println("lookupTable1", maskedSore1)
 	// fmt.Println("lookupTable2", maskedScore2)
 	result := maskedSore1 + maskedScore2
-	end := time.Now()
-	fmt.Println("Time taken to perform the lookups", end.Sub(start))
-	fmt.Println("result", result)
+    end := time.Now()
+    fmt.Println("Lookup Time:", end.Sub(start))
+	//fmt.Println("result", result)
 
-	resultClear := lookupTable(permRefTemp, permProbeTemp)
-	fmt.Println("resultClear", resultClear)
+    res := make([]int32, 1)
+    res[0] = int32(result)
+
+    // FSS EVAL
+    s := time.Now()
+    o_0, err := FssEvalSign(K, false, k0, res)
+    if err != nil {
+        log.Fatal(err)
+    }
+    o_1, err := FssEvalSign(K, true, k1, res)
+    if err != nil {
+        log.Fatal(err)
+    }
+    o := make([]uint16, len(o_0))
+    for i := range o_0 {
+        o[i] = o_0[i] + o_1[i]
+    }
+    e := time.Now()
+    fmt.Println("FSS Time:", e.Sub(s))
+
+    fmt.Println("o:", o)
+
+	//resultClear := lookupTable(permRefTemp, permProbeTemp)
+	//fmt.Println("resultClear", resultClear)
 }
+
+func FssGenSign(K int32, theta uint16) ([]int32, []int32, []byte, []byte) {
+    r_in0 := make([]int32, K)
+    r_in1 := make([]int32, K)
+    k0 := make([]byte, K*C.KEY_LEN)
+    k1 := make([]byte, K*C.KEY_LEN)
+
+    r_in0Ptr := (*C.uint16_t)(unsafe.Pointer(&r_in0[0]))
+    r_in1Ptr := (*C.uint16_t)(unsafe.Pointer(&r_in1[0]))
+	k0Ptr := (*C.uint8_t)(unsafe.Pointer(&k0[0]))
+	k1Ptr := (*C.uint8_t)(unsafe.Pointer(&k1[0]))
+
+    C.SIGN_gen_batch(C.size_t(K), C.uint16_t(theta), r_in0Ptr, r_in1Ptr, k0Ptr, k1Ptr)
+
+    return r_in0, r_in1, k0, k1
+}
+
+func FssEvalSign(K int32, j bool, k_j []byte, x_hat []int32) ([]uint16, error) {
+    if len(x_hat) != int(K) {
+		return nil, fmt.Errorf("<FssEvalSign error> x_hat shares must be of length %d", K)
+	}
+	if len(k_j) != int(K*C.KEY_LEN) {
+		return nil, fmt.Errorf("<FssEvalSign error> FSS keys k_j must be of length %d", K*C.KEY_LEN)
+	}
+
+	o_j := make([]uint16, K)
+
+	k_jPtr := (*C.uint8_t)(unsafe.Pointer(&k_j[0]))
+	x_hatPtr := (*C.uint16_t)(unsafe.Pointer(&x_hat[0]))
+	o_jPtr := (*C.uint16_t)(unsafe.Pointer(&o_j[0]))
+
+	C.SIGN_eval_batch(C.size_t(K), C.bool(j), k_jPtr, x_hatPtr, o_jPtr)
+
+	return o_j, nil
+}
+
+func divideIntoParts(value int32, d int) []int32 {
+	parts := make([]int32, d)
+
+	if d == 1 {
+		parts[0] = value
+		return parts
+	}
+
+    // FIND A WAY TO INCORPORATE THE REMAINING
+	r := rand.New(rand.NewSource(42))
+	remaining := value
+	for i := 0; i < d-1; i++ {
+		// Generate a random number between 0 and remaining value
+		parts[i] = r.Int31() % (1 << 16)
+		remaining -= parts[i]
+	}
+
+	parts[d-1] = remaining
+
+	rand.Shuffle(d, func(i, j int) { parts[i], parts[j] = parts[j], parts[i] })
+
+	return parts
+}
+

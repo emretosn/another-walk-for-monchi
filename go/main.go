@@ -31,8 +31,8 @@ func main() {
     //READING THE DATA AND TABLE CONVERSION
     mfipPath := "./lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
     borderPath := "./lookupTables/Borders/Borders_nB_3_dimF_128.csv"
-    //lfwRefPath := "./data/LFW/Paul_McCartney/0.csv"
     lfwRefPath := "./data/LFW/John_Lennon/0.csv"
+    //lfwRefPath := "./data/LFW/Paul_McCartney/0.csv"
     lfwProbPath := "./data/LFW/Paul_McCartney/1.csv"
 
     mfip, err := readCSVTo2DSlice(mfipPath)
@@ -116,31 +116,28 @@ func main() {
     //fmt.Println("quantizedProbe", quantizedProbe)
 
     // FSS RANDOMNESS
-    startFSS := time.Now()
     P0.r_in, P1.r_in, P0.k, P1.k = FssGenSign(K, THETA)
-    endFSS := time.Now()
-    fmt.Println("FSS timing:", endFSS.Sub(startFSS))
 
     BIP.r_in = make([]int32, K)
     for i := range P0.r_in {
         BIP.r_in[i] = P0.r_in[i] + P1.r_in[i]
     }
-    fmt.Printf("P0 r_in : %v\n", P0.r_in[:1])
-    fmt.Printf("P1 r_in : %v\n", P1.r_in[:1])
-    fmt.Printf("BIP r_in: %v\n", BIP.r_in[:1])
+    //fmt.Printf("P0 r_in : %v\n", P0.r_in[:1])
+    //fmt.Printf("P1 r_in : %v\n", P1.r_in[:1])
+    //fmt.Printf("BIP r_in: %v\n", BIP.r_in[:1])
 
     // Adding fss randomness to selected columns before ecnryption
     r_values := divideIntoParts(BIP.r_in[0], NFEAT)
-    fmt.Println("BIP.r_in divided:", r_values)
+    //fmt.Println("BIP.r_in divided:", r_values)
 
     ctxtSelection := Enrollment.encryptPermutedRefTempSingleCT(r_values, refTemp, permutations)
     BIP.c_selection = ctxtSelection
 
-    encOut1 := CKSDecrypt(P0.params, PPool, ctxtSelection)
-    ptres1 := bfv.NewPlaintext(P0.params, params.MaxLevel())
-	P0.decryptor.Decrypt(encOut1, ptres1)
-    res1 := P0.encoder.DecodeIntNew(ptres1)
-    fmt.Println("ctxtSelection:", res1[:32])
+    //encOut1 := CKSDecrypt(P0.params, PPool, ctxtSelection)
+    //ptres1 := bfv.NewPlaintext(P0.params, params.MaxLevel())
+	//P0.decryptor.Decrypt(encOut1, ptres1)
+    //res1 := P0.encoder.DecodeIntNew(ptres1)
+    //fmt.Println("ctxtSelection:", res1[:32])
 
     permProbeTemp := genPermProbeTemplateFromPermInv(quantizedProbe, permutationsInv, NROWS);
     permProbeTempMask := getPermutedProbeTempMask(permProbeTemp, Enrollment.params.N())
@@ -149,8 +146,7 @@ func main() {
     Gate.col_selection = permProbeTempMask
 
     // TIMING SCORE
-    start := time.Now()
-
+    lookupTime := time.Now()
     result := P0.getFinalScoreCT(BIP, Gate.col_selection)
 
     // Decrypt Score
@@ -158,19 +154,23 @@ func main() {
     ptres := bfv.NewPlaintext(params, params.MaxLevel())
 	P0.decryptor.Decrypt(encOut, ptres)
     res := P0.encoder.DecodeIntNew(ptres)
-    fmt.Println("getFinalScoreCT:", res[:32])
+    //fmt.Println("getFinalScoreCT:", res[:32])
 
-    x_hat := make([]int32, len(res))
-    for i, v := range res {
-        x_hat[i] = int32(v)
-    }
+    lookupEnclosed := time.Since(lookupTime)
+    fmt.Println("Lookup Time:", lookupEnclosed)
+
+    x_hat := make([]int32, 1)
+    x_hat[0] = int32(res[0])
+    //fmt.Println("x_hat:", x_hat)
 
     // FSS EVAL
-    o_0, err := FssEvalSign(K, false, P0.k, x_hat[:K])
+    fssTime := time.Now()
+
+    o_0, err := FssEvalSign(K, false, P0.k, x_hat)
     if err != nil {
         log.Fatal(err)
     }
-    o_1, err := FssEvalSign(K, true, P1.k, x_hat[:K])
+    o_1, err := FssEvalSign(K, true, P1.k, x_hat)
     if err != nil {
         log.Fatal(err)
     }
@@ -179,10 +179,11 @@ func main() {
         o[i] = o_0[i] + o_1[i]
     }
 
-    fmt.Println("o  :", o)
+    fssEnclosed := time.Since(fssTime)
+    fmt.Println("FSS Time:", fssEnclosed)
 
-    end := time.Now()
-    fmt.Println("time", end.Sub(start))
+    fmt.Println("o:", o)
+
 }
 
 func FssGenSign(K int32, theta uint16) ([]int32, []int32, []byte, []byte) {
