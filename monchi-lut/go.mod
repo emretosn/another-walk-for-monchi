@@ -1,4 +1,4 @@
-module fss
+module monchi-lut
 
 go 1.23
 

@@ -1,3 +1,3 @@
-module test
+module monchichi
 
 go 1.23
