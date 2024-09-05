@@ -1,8 +1,8 @@
 package main
 
 /*
-#cgo CFLAGS: -I./funshade/funshade/c
-#cgo LDFLAGS: -L./funshade/build -laes -lfss
+#cgo CFLAGS: -I../funshade/funshade/c
+#cgo LDFLAGS: -L../funshade/build -laes -lfss
 
 #include "aes.h"
 #include "fss.h"
