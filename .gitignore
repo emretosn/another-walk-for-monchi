@@ -1,9 +1,9 @@
 **/build
 **/__pycache__
-#*.pdf
+*.pdf
 *.pkl
-#*.csv
+*.csv
 *.npy
 .DS_Store
-# *.txt
+*.txt
 
