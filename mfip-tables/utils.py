@@ -1,4 +1,3 @@
-
 import numpy as np
 from numpy import linalg
 
@@ -19,7 +18,6 @@ def genSynSamplesNormalDist(seed, numSamples, dimVect):
     rng = np.random.default_rng(seed=seed)
     y = rng.normal(loc=0.0, scale=1.0, size=(dimVect, numSamples))
     return normalizeData(y)
-
 
 def flattenList(lists):
     flatList = []
