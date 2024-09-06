@@ -11,7 +11,6 @@ RANDN = 32
 def getIndexQF(x, t):
     return len(np.where(t<x)[0])
 
-
 def computeScore(x, y, t, table, rand):
     nFeat = len(x)
     score = 0
@@ -20,7 +19,6 @@ def computeScore(x, y, t, table, rand):
         iy = getIndexQF(y[i], t)
         score += (table[ix,iy] + rand[ix,iy])
     return score
-
 
 def compIPandIPQ(i, synSamples, t, tabQMFIP, tabRand):
     x = synSamples[:,i]
@@ -40,12 +38,10 @@ def unifOnHyperSpherePDF(x, m):
 def unifOnHyperSphereXExp(x, m):
     return x*unifOnHyperSpherePDF(x, m)
 
-
 def genTabMFIP(nB, featDim):
     t = findEquiProbThresholdsBrentq(2**nB , featDim)
     tabMFIP = jointUnifOnHyperSphereConditionalExp(nB, featDim, t)
     return t, tabMFIP
-
 
 def genBordersLookupTables(nB, featDim):
     t = findEquiProbThresholdsBrentq(2**nB , featDim)
@@ -78,7 +74,6 @@ def unifOnHyperSphereCDF(x, m):
     cdf = c * (firstTermX + secondTermX - firstTermMinus1)
     return cdf
 
-
 def findEquiProbThresholdsBrentq(n, m):
     borders = []
     p = np.arange(1,n)/n
@@ -88,7 +83,6 @@ def findEquiProbThresholdsBrentq(n, m):
         root = optimize.brentq(cdf, -1, 1)
         borders.append(root)
     return borders
-
 
 def jointUnifOnHyperSphereConditionalExp(nB, featDim, t):
     inf = 1
@@ -140,7 +134,6 @@ def jointUnifOnHyperSphereConditionalExp(nB, featDim, t):
 
     return pSame
 
-
 def matedIP(dataDir, subject, t, tabQIP, tabRand, nFix = 15):
     matedScIP = []
     matedScIPQ = []
@@ -160,16 +153,12 @@ def matedIP(dataDir, subject, t, tabQIP, tabRand, nFix = 15):
         matedScIPQ.append(computeScore(x, y, t, tabQIP, tabRand))
     return matedScIP, matedScIPQ
 
-
 def nonMatedIP(dataDir, subject, subjectIDs, t, tabQIP, tabRand, nFix = 5):
-
     nonMatedScIP = []
     nonMatedScIPQ = []
 
-
     subjID = subjectIDs.index(subject)
     subjectList = subjectIDs[subjID+1:]
-
 
     fixFR = glob.glob(dataDir+f'/{subject}/*.npy')
     fixFR.sort()
@@ -177,13 +166,11 @@ def nonMatedIP(dataDir, subject, subjectIDs, t, tabQIP, tabRand, nFix = 5):
 
     fixFR = fixFR[:n] if (n < nFix) else fixFR[:nFix]
 
-
     impFR = [ dataDir+f'/{subj}' for subj in subjectList]
 
     for tempFR in fixFR:
         x = np.load(tempFR)
         x = normalizeSample(x)
-
 
         for probeFR in impFR:
             embProbFR = glob.glob(probeFR+'/*.npy')[0]
