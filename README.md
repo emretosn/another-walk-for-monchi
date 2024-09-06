@@ -11,6 +11,7 @@
 
 ### Usage
 The tests have been conducted in Linux and MacOS
+
 To run the project:
 - First you have to follow the instructions in `funshade/README.md` to generate the shared object files.
 - Generate the borders and mfip-tables with `mfip-tables/genBorderMFIP.py`.
