@@ -2,7 +2,7 @@ package main
 
 /*
 #cgo CFLAGS: -I../funshade/funshade/c
-#cgo LDFLAGS: -L../funshade/build -laes -lfss
+#cgo LDFLAGS: -L../funshade/build -laes -lfss -Wl,-rpath,../funshade/build
 
 #include "aes.h"
 #include "fss.h"
@@ -254,11 +254,11 @@ const NROWS = 8
 const K     = 1
 const THETA = 200
 
-const DBSIZE = 1000000
+const DBSIZE = 200
 
 func main() {
-	mfipPath := "../go/lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
-    borderPath := "../go/lookupTables/Borders/Borders_nB_3_dimF_128.csv"
+	mfipPath := "../monchi-lut/lookupTables/MFIP/MFIP_nB_3_dimF_128.csv"
+    borderPath := "../monchi-lut/lookupTables/Borders/Borders_nB_3_dimF_128.csv"
     mfip, err := readCSVTo2DSlice(mfipPath)
     if err != nil {
         fmt.Println(fmt.Errorf(err.Error()))
@@ -269,7 +269,7 @@ func main() {
     }
 
     // GETTING THE BIOMETRIC DATA
-    bioData := ReadBioData("../go/data/LFW/")
+    bioData := ReadBioData("../monchi-lut/data/LFW/")
 
     // To save test results
     err = os.MkdirAll("results", os.ModePerm)

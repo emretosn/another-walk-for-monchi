@@ -2,7 +2,7 @@ package main
 
 /*
 #cgo CFLAGS: -I../funshade/funshade/c
-#cgo LDFLAGS: -L../funshade/build -laes -lfss
+#cgo LDFLAGS: -L../funshade/build -laes -lfss -Wl,-rpath,../funshade/build
 
 #include "aes.h"
 #include "fss.h"
@@ -30,7 +30,7 @@ const NROWS = 8
 const K     = 1
 const THETA = 200
 
-const DBSIZE = 1000000
+const DBSIZE = 200
 
 func main() {
     // SETTING FHE PARAMETERS
@@ -185,24 +185,32 @@ func main() {
         encOut := CKSDecrypt(P0.params, PPool, result)
         ptres := bfv.NewPlaintext(params, params.MaxLevel())
         P0.decryptor.Decrypt(encOut, ptres)
-        res := P0.encoder.DecodeIntNew(ptres)
+        res0 := P0.encoder.DecodeIntNew(ptres)
         //fmt.Println("getFinalScoreCT:", res[:32])
+
+        encOut = CKSDecrypt(P1.params, PPool, result)
+        ptres = bfv.NewPlaintext(params, params.MaxLevel())
+        P0.decryptor.Decrypt(encOut, ptres)
+        res1 := P0.encoder.DecodeIntNew(ptres)
 
         lookupEnclosed := time.Since(lookupTime)
         fmt.Println("Lookup Time:", lookupEnclosed)
 
-        x_hat := make([]int32, 1)
-        x_hat[0] = int32(res[0])
+        x_hat0 := make([]int32, 1)
+        x_hat0[0] = int32(res0[0])
         //fmt.Println("x_hat:", x_hat)
+
+        x_hat1 := make([]int32, 1)
+        x_hat1[0] = int32(res1[0])
 
         // FSS EVAL
         fssTime := time.Now()
 
-        o_0, err := FssEvalSign(K, false, P0.k, x_hat)
+        o_0, err := FssEvalSign(K, false, P0.k, x_hat0)
         if err != nil {
             log.Fatal(err)
         }
-        o_1, err := FssEvalSign(K, true, P1.k, x_hat)
+        o_1, err := FssEvalSign(K, true, P1.k, x_hat1)
         if err != nil {
             log.Fatal(err)
         }
