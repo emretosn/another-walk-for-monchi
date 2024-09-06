@@ -11,11 +11,6 @@ RANDN = 32
 def getIndexQF(x, t):
     return len(np.where(t<x)[0])
 
-'''
-        Updated computeScore function for BIP.
-
-        We're going to have x and y positions for both the table and the rand.
-'''
 
 def computeScore(x, y, t, table, rand):
     nFeat = len(x)
@@ -33,8 +28,6 @@ def compIPandIPQ(i, synSamples, t, tabQMFIP, tabRand):
     ip = np.sum(x*y)
     ipQ = computeScore(x, y, t, tabQMFIP, tabRand)
     return ip, ipQ
-
-
 
 # x is a feature element in [-1,1] from a normalized feature vector
 # m is the dimension of the feature vector
@@ -57,8 +50,7 @@ def genTabMFIP(nB, featDim):
 def genBordersLookupTables(nB, featDim):
     t = findEquiProbThresholdsBrentq(2**nB , featDim)
     tabMFIP = jointUnifOnHyperSphereConditionalExp(nB, featDim, t)
-    #tabMFSED = jointUnifOnHyperSphereConditionalExpSED(nB, featDim, t)
-    return t, tabMFIP#, tabMFSED
+    return t, tabMFIP
 
 # Equation (21) with the assumption that m is even
 

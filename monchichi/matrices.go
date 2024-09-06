@@ -1,46 +1,21 @@
 package main
 
 import (
-	"encoding/csv"
-	"fmt"
+    "os"
+    "fmt"
     "log"
-	"math"
-	"math/rand"
-	"os"
-	"strconv"
+    "strconv"
+	"encoding/csv"
+    "path/filepath"
 )
 
-func genRandMFBR(size int64) [][]int64 {
-	X := make([][]int64, size)
-	for row := range X {
-		X[row] = make([]int64, size)
-		for col := range X[row] {
-			X[row][col] = int64(rand.Intn(int(math.Pow(float64(size), 2))))
-		}
-	}
-	return X
-}
 
-func genRandInexes(size int, maxval int) []int64 {
-	b := make([]int64, size)
-	for i := range size {
-		b[i] = int64(rand.Intn(maxval))
+func flattenMatrix(matrix [][]int64) []int64 {
+	var flattened []int64
+	for _, row := range matrix {
+		flattened = append(flattened, row...)
 	}
-	return b
-}
-
-func printMatrix[T any](matrix [][]T) {
-	for _, m := range matrix {
-		fmt.Println(m)
-	}
-}
-
-func flatten[T any](lists [][]T) []T {
-	var res []T
-	for _, list := range lists {
-		res = append(res, list...)
-	}
-	return res
+	return flattened
 }
 
 func readCSVTo2DSlice(filename string) ([][]int64, error) {
@@ -105,6 +80,35 @@ func readCSVToFloatSlice(filename string) ([]float64, error) {
 	return result, nil
 }
 
+// Reads files with at least two photos to a map
+func ReadBioData(path string) map[int][]string {
+    bioData := make(map[int][]string, 0)
+    i := 0
+
+    items, err := os.ReadDir(path)
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, item := range items {
+        if item.IsDir() {
+            subdirPath := filepath.Join(path, item.Name())
+            subitems, err := os.ReadDir(subdirPath)
+            if err != nil {
+                log.Fatal(err)
+            }
+            for _, sitem := range subitems {
+                if sitem.Name() == "1.csv" {
+                    dataRefPath := filepath.Join(subdirPath, "0.csv")
+                    dataProbePath := filepath.Join(subdirPath, sitem.Name())
+                    bioData[i] = []string{dataRefPath, dataProbePath}
+                    i++
+                }
+            }
+        }
+    }
+    return bioData
+}
+
 func addRecord(writer *csv.Writer, record []string) {
     err := writer.Write(record)
     if err != nil {
@@ -112,3 +116,4 @@ func addRecord(writer *csv.Writer, record []string) {
     }
     writer.Flush()
 }
+

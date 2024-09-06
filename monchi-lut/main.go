@@ -297,12 +297,3 @@ func ReadBioData(path string) map[int][]string {
     }
     return bioData
 }
-
-func addRecord(writer *csv.Writer, record []string) {
-    err := writer.Write(record)
-    if err != nil {
-        log.Fatalf("Failed to write record to CSV: %s", err)
-    }
-    writer.Flush() // Ensure that the record is written to the file
-}
-
