@@ -19,7 +19,6 @@ This repository contains the official code of the research paper [Another Walk f
 - _Languages_: Go (1.23), C (99+), Python (3.8+)
 - _Platforms_: Linux, MacOS
 - _Dependencies_: `tuneinsight/lattigo/v4 v4.1.0`
-- _Code Author_: Anonymous
 - _License_: GNU GPLv3 (any code derived from this must be **open source**)
 ### Launch an experiment
 - First, follow the instructions in `funshade/README.md` to generate the shared object files.
